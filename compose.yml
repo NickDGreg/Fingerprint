@@ -1,0 +1,6 @@
+services:
+  fingerprint-worker:
+    image: ghcr.io/tracehammer/fingerprint:${IMAGE_TAG:-latest}
+    env_file:
+      - .env
+    restart: unless-stopped
