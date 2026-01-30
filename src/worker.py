@@ -16,6 +16,16 @@ from bs4 import BeautifulSoup
 from convex import ConvexClient
 
 try:
+    import pyasn
+except Exception:
+    pyasn = None
+
+try:
+    import jarm
+except Exception:
+    jarm = None
+
+try:
     import ssdeep
 except Exception:
     ssdeep = None
@@ -60,6 +70,11 @@ def parse_number(raw_value, fallback, minimum=None):
 
 def strip_nones(payload):
     return {key: value for key, value in payload.items() if value is not None}
+
+
+def join_errors(*messages):
+    filtered = [message for message in messages if message]
+    return "; ".join(filtered) if filtered else None
 
 
 def truncate_value(value, max_len):
@@ -365,6 +380,78 @@ def resolve_ips(hostname):
     return addresses
 
 
+def load_asn_db(db_path):
+    if not db_path or not pyasn:
+        return None, "asn_db_unavailable"
+    try:
+        return pyasn.pyasn(db_path), None
+    except Exception as error:
+        return None, f"asn_db_error: {error}"
+
+
+def lookup_asn(db, ip_addresses):
+    if not db or not ip_addresses:
+        return None
+    asns = []
+    for ip in ip_addresses:
+        try:
+            asn, _ = db.lookup(ip)
+        except Exception:
+            asn = None
+        if asn:
+            label = f"AS{asn}"
+            if label not in asns:
+                asns.append(label)
+    return ", ".join(asns) if asns else None
+
+
+def compute_jarm(hostname, port, timeout_ms):
+    if not hostname:
+        return None, "jarm_no_host"
+    if not jarm:
+        return None, "jarm_unavailable"
+
+    candidates = [
+        "get_jarm_hash",
+        "jarm_hash",
+        "hash",
+        "fingerprint",
+    ]
+    timeout_seconds = max(1, int(timeout_ms / 1000))
+    last_error = None
+
+    for name in candidates:
+        func = getattr(jarm, name, None)
+        if not callable(func):
+            continue
+        for args in (
+            (hostname, port, timeout_seconds),
+            (hostname, port),
+            (hostname, f"{hostname}:{port}"),
+            (f"{hostname}:{port}",),
+            (hostname,),
+        ):
+            try:
+                result = func(*args)
+            except Exception as error:
+                last_error = str(error)
+                continue
+
+            if isinstance(result, str) and result:
+                return result, None
+            if isinstance(result, (list, tuple)) and result:
+                first = result[0]
+                if isinstance(first, str) and first:
+                    return first, None
+            if isinstance(result, dict):
+                for key in ("jarm", "hash", "fingerprint"):
+                    value = result.get(key)
+                    if isinstance(value, str) and value:
+                        return value, None
+
+    return None, last_error or "jarm_failed"
+
+
 def format_x509_name(name):
     if not name:
         return None
@@ -489,6 +576,11 @@ def main():
     fingerprint_favicon_max_bytes = parse_number(
         os.environ.get("FINGERPRINT_FAVICON_MAX_BYTES"), 100000, 1024
     )
+    fingerprint_asn_db_path = os.environ.get("FINGERPRINT_ASN_DB_PATH")
+    fingerprint_jarm_timeout_ms = parse_number(
+        os.environ.get("FINGERPRINT_JARM_TIMEOUT_MS"), fingerprint_timeout_ms, 1000
+    )
+    fingerprint_disable_jarm = os.environ.get("FINGERPRINT_DISABLE_JARM") == "1"
     fingerprint_user_agent = os.environ.get("FINGERPRINT_USER_AGENT") or (
         "TracehammerFingerprint/0.2"
     )
@@ -530,6 +622,15 @@ def main():
         f"id={worker_id} batchSize={batch_size} pollIntervalMs={poll_interval_ms} "
         f"fingerprintTimeoutMs={fingerprint_timeout_ms} htmlMaxBytes={fingerprint_html_max_bytes}"
     )
+
+    asn_db, asn_error = load_asn_db(fingerprint_asn_db_path)
+    if asn_error:
+        print(f"[worker] ASN lookup disabled: {asn_error}")
+    if fingerprint_disable_jarm:
+        print("[worker] JARM disabled via FINGERPRINT_DISABLE_JARM=1")
+    elif jarm is None:
+        print("[worker] JARM library unavailable; install jarm to enable TLS fingerprinting")
+        sys.exit(1)
 
     while not shutting_down["value"]:
         try:
@@ -826,6 +927,17 @@ def main():
                 parsed_host = urlparse(base_url).hostname or ""
                 ip_addresses = resolve_ips(parsed_host)
                 tls_info = collect_tls_info(parsed_host, fingerprint_timeout_ms)
+                asn_value = lookup_asn(asn_db, ip_addresses)
+                asn_todo = asn_value is None
+                asn_error_detail = asn_error if asn_todo else None
+                if fingerprint_disable_jarm:
+                    jarm_value = None
+                    jarm_error = "jarm_disabled"
+                else:
+                    jarm_value, jarm_error = compute_jarm(
+                        parsed_host, 443, fingerprint_jarm_timeout_ms
+                    )
+                jarm_todo = jarm_value is None
                 tls_payload = strip_nones(
                     {
                         "scanId": scan_id,
@@ -838,10 +950,16 @@ def main():
                         "certIssuer": tls_info.get("cert_issuer"),
                         "certNotBefore": tls_info.get("cert_not_before"),
                         "certNotAfter": tls_info.get("cert_not_after"),
-                        "jarmTodo": True,
-                        "asnTodo": True,
+                        "jarm": jarm_value,
+                        "jarmTodo": jarm_todo,
+                        "asn": asn_value,
+                        "asnTodo": asn_todo,
                         "errorType": tls_info.get("error_type"),
-                        "errorDetail": tls_info.get("error_detail"),
+                        "errorDetail": join_errors(
+                            tls_info.get("error_detail"),
+                            asn_error_detail,
+                            jarm_error if jarm_todo else None,
+                        ),
                         "recordedAt": fetched_at,
                     }
                 )

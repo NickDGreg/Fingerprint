@@ -90,6 +90,9 @@ Optional:
 - `FINGERPRINT_MAX_EXTERNAL_DOMAINS` — cap on stored external domains (default: `50`).
 - `FINGERPRINT_FAVICON_TIMEOUT_MS` — favicon fetch timeout (default: `5000`).
 - `FINGERPRINT_FAVICON_MAX_BYTES` — max favicon bytes to hash (default: `100000`).
+- `FINGERPRINT_ASN_DB_PATH` — optional path to an IP→ASN database file for ASN lookup.
+- `FINGERPRINT_JARM_TIMEOUT_MS` — timeout for JARM fingerprinting (default: `8000`).
+- `FINGERPRINT_DISABLE_JARM` — set to `1` to skip JARM (otherwise required).
 - `FINGERPRINT_USER_AGENT` — override the HTTP user agent string.
 - `CONVEX_ADMIN_KEY` — optional admin key if your Convex deployment requires it and your SDK supports admin auth.
 - `CONVEX_AUTH_TOKEN` — optional auth token if you gate mutations behind auth.

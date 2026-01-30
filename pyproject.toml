@@ -3,4 +3,4 @@ name = "tracehammer-fingerprint-worker"
 version = "0.1.0"
 description = "Scam site fingerprinting worker"
 requires-python = ">=3.11"
-dependencies = ["beautifulsoup4", "convex", "mmh3", "requests", "ssdeep"]
+dependencies = ["beautifulsoup4", "convex", "jarm", "mmh3", "pyasn", "requests", "ssdeep"]
