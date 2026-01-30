@@ -150,6 +150,23 @@ The system is intentionally simple.
 
 ---
 
+## CI/CD Deployment
+
+On each push to `main`, GitHub Actions builds the Docker image, tags it with the commit SHA and `latest`, pushes to GHCR, then deploys to the VM over SSH by updating `/home/github/fingerprint/compose.yml` and running `docker compose pull` + `docker compose up -d`.
+
+VM requirements:
+- Docker installed and running.
+- `github` user exists with SSH access.
+- `/home/github/fingerprint/.env` is present with required worker environment variables.
+- The VM is already logged into GHCR (`docker login ghcr.io`).
+
+Rollback (from the VM):
+```bash
+cd /home/github/fingerprint
+IMAGE_TAG=<previous-sha> docker compose pull
+IMAGE_TAG=<previous-sha> docker compose up -d
+```
+
 ## Design Principles
 
 - Convex is the database and job queue
