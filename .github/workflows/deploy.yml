@@ -60,6 +60,12 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "${{ secrets.VM_IP }}" >> ~/.ssh/known_hosts
 
+      - name: Ensure deployment directory
+        run: ssh github@${{ secrets.VM_IP }} "mkdir -p /home/github/fingerprint"
+
+      - name: Upload compose.yml
+        run: scp compose.yml github@${{ secrets.VM_IP }}:/home/github/fingerprint/compose.yml
+
       - name: Deploy
         run: |
           IMAGE_NAME="${{ env.IMAGE_NAME }}"
