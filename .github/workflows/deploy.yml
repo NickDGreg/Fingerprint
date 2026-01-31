@@ -20,6 +20,8 @@ jobs:
       sha_short: ${{ steps.vars.outputs.sha_short }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
@@ -38,8 +40,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/fingerprint:latest
-            ghcr.io/${{ github.repository_owner }}/fingerprint:${{ steps.vars.outputs.sha_short }}
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.sha_short }}
 
   deploy:
     runs-on: ubuntu-latest
@@ -47,6 +49,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Prepare SSH
         run: |
@@ -57,7 +62,7 @@ jobs:
 
       - name: Deploy
         run: |
-          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/fingerprint"
+          IMAGE_NAME="${{ env.IMAGE_NAME }}"
           IMAGE_TAG="${{ needs.build.outputs.sha_short }}"
 
           ssh github@${{ secrets.VM_IP }} "
