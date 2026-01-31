@@ -467,7 +467,9 @@ def collect_tls_info(hostname, timeout_ms):
         return {"error_type": "no_host"}
     try:
         context = ssl.create_default_context()
-        with socket.create_connection((hostname, 443), timeout=timeout_ms / 1000) as sock:
+        with socket.create_connection(
+            (hostname, 443), timeout=timeout_ms / 1000
+        ) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as tls_sock:
                 cert_der = tls_sock.getpeercert(binary_form=True)
                 cert = tls_sock.getpeercert()
@@ -500,7 +502,9 @@ def build_run_outcome(http_result, sample_bytes, sample_truncated):
                 "finalUrl": http_result.get("final_url"),
                 "contentType": http_result.get("content_type"),
                 "contentLength": http_result.get("content_length"),
-                "sample": decode_bytes(sample_bytes, http_result.get("encoding", "utf-8")),
+                "sample": decode_bytes(
+                    sample_bytes, http_result.get("encoding", "utf-8")
+                ),
                 "sampleTruncated": sample_truncated,
                 "durationMs": http_result.get("duration_ms"),
             }
@@ -629,8 +633,8 @@ def main():
     if fingerprint_disable_jarm:
         print("[worker] JARM disabled via FINGERPRINT_DISABLE_JARM=1")
     elif jarm is None:
-        print("[worker] JARM library unavailable; install jarm to enable TLS fingerprinting")
-        sys.exit(1)
+        print("[worker] JARM library unavailable; TLS fingerprinting disabled")
+        fingerprint_disable_jarm = True
 
     while not shutting_down["value"]:
         try:
@@ -719,13 +723,17 @@ def main():
                         "errorDetail": http_result.get("error_detail"),
                     }
                 )
-                call_mutation(client, "fingerprints:upsertHttpFingerprint", http_payload)
+                call_mutation(
+                    client, "fingerprints:upsertHttpFingerprint", http_payload
+                )
 
                 html_text = ""
                 html_ok = False
                 if body_bytes:
                     html_text = decode_bytes(body_bytes, encoding)
-                    html_ok = looks_like_html(http_result.get("content_type"), html_text)
+                    html_ok = looks_like_html(
+                        http_result.get("content_type"), html_text
+                    )
 
                 html_payload = {
                     "scanId": scan_id,
@@ -798,7 +806,9 @@ def main():
                         else:
                             external_domains.append(normalize_host(host))
 
-                    external_domains = list(dict.fromkeys(filter(None, external_domains)))
+                    external_domains = list(
+                        dict.fromkeys(filter(None, external_domains))
+                    )
                     filtered_external = [
                         domain
                         for domain in external_domains
@@ -812,9 +822,9 @@ def main():
                     assets_payload["externalDomainsFiltered"] = filtered_external[
                         :fingerprint_max_external_domains
                     ]
-                    assets_payload["localAssetsTruncated"] = len(
-                        local_assets
-                    ) > fingerprint_max_assets
+                    assets_payload["localAssetsTruncated"] = (
+                        len(local_assets) > fingerprint_max_assets
+                    )
 
                     for asset_url in local_assets[:fingerprint_max_assets]:
                         asset_result = fetch_binary(
@@ -836,9 +846,7 @@ def main():
                                         "contentLength": asset_result.get(
                                             "content_length"
                                         ),
-                                        "truncated": asset_result.get(
-                                            "body_truncated"
-                                        ),
+                                        "truncated": asset_result.get("body_truncated"),
                                     }
                                 )
                             )
