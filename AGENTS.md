@@ -129,3 +129,5 @@ Run these from the repo root and ensure all are clear:
 - `uv run ruff check .` (lint)
 - `uv run ruff format .` (format)
 - `uv run ty check .` (typecheck)
+- `uv run pytest` (tests)
+- `uv run python scripts/run_fixture_smoke.py` (smoke: fixture server + file job source)

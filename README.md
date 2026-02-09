@@ -77,6 +77,12 @@ Optional:
 - `WORKER_POLL_INTERVAL_MS` — idle wait before polling again (default: `5000`).
 - `WORKER_BATCH_SIZE` — domains to claim per loop (default: `1`).
 - `WORKER_LEASE_DURATION_MS` — lease duration for claimed work (default: `60000`).
+- `WORKER_MAX_LOOPS` — maximum poll loops before exit (use `1` for a single run).
+- `WORKER_ONCE` — set to `1` to run a single poll loop and exit.
+- `JOB_SOURCE` — `convex` (default) or `file` for local fixtures.
+- `JOB_FILE` — path to jobs JSON when `JOB_SOURCE=file` (default: `tests/fixtures/jobs.json`).
+- `RESULT_SINK` — `convex` (default) or `file` for local output.
+- `RESULTS_FILE` — path to results JSON when `RESULT_SINK=file` (default: `tests/fixtures/results.json`).
 - `FINGERPRINT_TIMEOUT_MS` — per-request timeout for HTTP fingerprinting (default: `8000`).
 - `FINGERPRINT_HTML_MAX_BYTES` — max HTML bytes to read for hashing (default: `512000`).
 - `FINGERPRINT_SAMPLE_BYTES` — max bytes stored as the run sample (default: `2048`).
@@ -93,6 +99,7 @@ Optional:
 - `FINGERPRINT_ASN_DB_PATH` — optional path to an IP→ASN database file for ASN lookup.
 - `FINGERPRINT_JARM_TIMEOUT_MS` — timeout for JARM fingerprinting (default: `8000`).
 - `FINGERPRINT_DISABLE_JARM` — set to `1` to skip JARM (otherwise required).
+- `FINGERPRINT_DISABLE_TLS` — set to `1` to skip TLS/ASN/JARM lookups (fixture-friendly).
 - `FINGERPRINT_USER_AGENT` — override the HTTP user agent string.
 - `CONVEX_ADMIN_KEY` — optional admin key if your Convex deployment requires it and your SDK supports admin auth.
 - `CONVEX_AUTH_TOKEN` — optional auth token if you gate mutations behind auth.
@@ -122,6 +129,14 @@ CONVEX_URL="https://<your-convex-deployment>" uv run python src/worker.py
 If you need to (re)install dependencies locally:
 ```bash
 uv sync
+```
+
+### Local fixture smoke (no Convex)
+
+Run a deterministic local fixture server and process a small set of test jobs:
+
+```bash
+uv run python scripts/run_fixture_smoke.py
 ```
 
 Docker installs the Convex SDK directly via `pip install convex` for simplicity.
