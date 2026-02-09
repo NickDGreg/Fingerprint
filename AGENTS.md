@@ -117,3 +117,15 @@ Logs, run records, and timestamps are first-class outputs.
 - Break down the code following software engineering best practices, we do not want one single file that does everything, we need compartmentalised, testable, debuggable code
 
 The agent should always optimise for **clarity over cleverness**.
+
+---
+
+## Verification Commands
+
+After making code changes, you must verify code quality.
+
+Run these from the repo root and ensure all are clear:
+
+- `uv run ruff check .` (lint)
+- `uv run ruff format .` (format)
+- `uv run ty check .` (typecheck)

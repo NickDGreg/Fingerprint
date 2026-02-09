@@ -182,3 +182,45 @@ IMAGE_TAG=<previous-sha> docker compose up -d
 Early-stage, evolving system.
 
 Expect schemas, fingerprint depth, and heuristics to change rapidly.
+
+---
+
+## macOS install notes (`ssdeep` via `uv`)
+
+On macOS (especially Apple Silicon), the Python `ssdeep` package is often built from source and may fail during `uv sync` with errors like:
+
+- `ModuleNotFoundError: No module named 'pkg_resources'`
+- `fatal error: 'fuzzy.h' file not found`
+- autotools-related errors (`configure` missing, `libtoolize`/`automake` not found)
+
+### 1) Install system dependencies
+
+```sh
+brew install ssdeep autoconf automake libtool
+````
+
+If the build complains about `libtoolize` not found, Homebrew provides `glibtoolize`. Create a shim:
+
+```sh
+mkdir -p ~/.local/bin
+ln -sf "$(brew --prefix libtool)/bin/glibtoolize" ~/.local/bin/libtoolize
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### 2) Pin build-time `setuptools` for `ssdeep` in `pyproject.toml`
+
+Add:
+
+```toml
+[tool.uv.extra-build-dependencies]
+ssdeep = ["setuptools<81"]
+```
+
+(Reason: `ssdeep`’s build still imports `pkg_resources`, which may be missing with newer `setuptools`.)
+
+### 3) Sync (build bundled lib)
+
+```sh
+uv cache clean
+BUILD_LIB=1 uv sync
+```

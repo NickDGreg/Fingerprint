@@ -3,4 +3,24 @@ name = "tracehammer-fingerprint-worker"
 version = "0.1.0"
 description = "Scam site fingerprinting worker"
 requires-python = ">=3.11"
-dependencies = ["beautifulsoup4", "convex", "jarm", "mmh3", "pyasn", "requests", "ssdeep"]
+dependencies = [
+    "beautifulsoup4",
+    "convex",
+    "jarm",
+    "mmh3",
+    "pyasn",
+    "requests",
+    "ssdeep"
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff",
+  "ty>=0.0.15",
+]
+
+[tool.uv]
+build-constraint-dependencies = ["setuptools<81"]
+
+[tool.uv.extra-build-dependencies]
+ssdeep = ["setuptools<81"]
