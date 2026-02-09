@@ -1,11 +1,13 @@
 import hashlib
+import importlib
 import re
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
 try:
-    import ssdeep
+    ssdeep: Any = importlib.import_module("ssdeep")
 except Exception:
     ssdeep = None
 
@@ -126,9 +128,18 @@ def find_favicon_url(final_url, html_text):
         soup = BeautifulSoup(html_text, "html.parser")
         links = soup.find_all("link", href=True)
         for link in links:
-            rel = " ".join(link.get("rel", [])).lower()
+            rel_value = link.get("rel")
+            if isinstance(rel_value, str):
+                rel_list = [rel_value]
+            elif isinstance(rel_value, list):
+                rel_list = [str(item) for item in rel_value]
+            else:
+                rel_list = []
+            rel = " ".join(rel_list).lower()
             if "icon" in rel:
-                return urljoin(final_url, link["href"])
+                href = link.get("href")
+                if isinstance(href, str):
+                    return urljoin(final_url, href)
     except Exception:
         return urljoin(final_url, "/favicon.ico")
     return urljoin(final_url, "/favicon.ico")
@@ -145,15 +156,30 @@ def collect_asset_urls(html_text, base_url):
     soup = BeautifulSoup(html_text, "html.parser")
     urls = []
     for tag in soup.find_all("script", src=True):
-        urls.append(tag["src"])
+        src = tag.get("src")
+        if isinstance(src, str):
+            urls.append(src)
     for tag in soup.find_all("link", href=True):
-        rel = " ".join(tag.get("rel", [])).lower()
+        rel_value = tag.get("rel")
+        if isinstance(rel_value, str):
+            rel_list = [rel_value]
+        elif isinstance(rel_value, list):
+            rel_list = [str(item) for item in rel_value]
+        else:
+            rel_list = []
+        rel = " ".join(rel_list).lower()
         if "stylesheet" in rel:
-            urls.append(tag["href"])
+            href = tag.get("href")
+            if isinstance(href, str):
+                urls.append(href)
     for tag in soup.find_all("img", src=True):
-        urls.append(tag["src"])
+        src = tag.get("src")
+        if isinstance(src, str):
+            urls.append(src)
     for tag in soup.find_all("iframe", src=True):
-        urls.append(tag["src"])
+        src = tag.get("src")
+        if isinstance(src, str):
+            urls.append(src)
 
     normalized = []
     for raw in urls:
@@ -178,4 +204,3 @@ def extract_trackers(html_text):
                 fb_ids.append(group)
     fb_ids = sorted(set(fb_ids))
     return ga_ids, ga4_ids, gtm_ids, fb_ids
-

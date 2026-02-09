@@ -10,7 +10,7 @@ dependencies = [
     "mmh3",
     "pyasn",
     "requests",
-    "ssdeep"
+    "ssdeep",
 ]
 
 [project.optional-dependencies]

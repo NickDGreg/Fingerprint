@@ -153,4 +153,3 @@ def fetch_binary(url, timeout_ms, max_bytes, user_agent):
             "error_detail": str(error)[:200],
             "duration_ms": int((time.monotonic() - start) * 1000),
         }
-

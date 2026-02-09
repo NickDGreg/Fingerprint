@@ -5,6 +5,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import mmh3
@@ -129,9 +130,7 @@ def build_config(env):
     worker_id = env.get("WORKER_ID") or f"worker-{uuid.uuid4()}"
     poll_interval_ms = parse_number(env.get("WORKER_POLL_INTERVAL_MS"), 5000, 1000)
     batch_size = parse_number(env.get("WORKER_BATCH_SIZE"), 1, 1)
-    lease_duration_ms = parse_number(
-        env.get("WORKER_LEASE_DURATION_MS"), 60000, 1000
-    )
+    lease_duration_ms = parse_number(env.get("WORKER_LEASE_DURATION_MS"), 60000, 1000)
     fingerprint_timeout_ms = parse_number(env.get("FINGERPRINT_TIMEOUT_MS"), 8000, 1000)
     fingerprint_html_max_bytes = parse_number(
         env.get("FINGERPRINT_HTML_MAX_BYTES"), 512000, 4096
@@ -215,7 +214,7 @@ def build_convex_client(env):
     client = None
     if admin_key or auth_token:
         try:
-            client = ConvexClient(
+            client = cast(Any, ConvexClient)(
                 convex_url, admin_key=admin_key, auth_token=auth_token
             )
         except TypeError:
@@ -349,7 +348,9 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                 html_ok = False
                 if body_bytes:
                     html_text = decode_bytes(body_bytes, encoding)
-                    html_ok = looks_like_html(http_result.get("content_type"), html_text)
+                    html_ok = looks_like_html(
+                        http_result.get("content_type"), html_text
+                    )
 
                 html_payload = {
                     "scanId": scan_id,
@@ -422,7 +423,9 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         else:
                             external_domains.append(normalize_host(host))
 
-                    external_domains = list(dict.fromkeys(filter(None, external_domains)))
+                    external_domains = list(
+                        dict.fromkeys(filter(None, external_domains))
+                    )
                     filtered_external = [
                         domain
                         for domain in external_domains
@@ -453,7 +456,9 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                                 strip_nones(
                                     {
                                         "url": asset_url,
-                                        "sha256": compute_sha256(body) if body else None,
+                                        "sha256": compute_sha256(body)
+                                        if body
+                                        else None,
                                         "contentType": asset_result.get("content_type"),
                                         "contentLength": asset_result.get(
                                             "content_length"
@@ -490,7 +495,9 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     analytics_payload.update(
                         {"errorType": "no_html", "errorDetail": "no html body"}
                     )
-                    favicon_url = urlparse(base_url)._replace(path="/favicon.ico").geturl()
+                    favicon_url = (
+                        urlparse(base_url)._replace(path="/favicon.ico").geturl()
+                    )
 
                 call_mutation(
                     sink, "fingerprints:upsertAssetsFingerprint", assets_payload

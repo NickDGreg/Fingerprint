@@ -70,7 +70,9 @@ class FileJobSource:
         batch = self._jobs[self._cursor : self._cursor + limit]
         start_index = self._cursor
         self._cursor += len(batch)
-        work = [self._ensure_ids(job, start_index + idx) for idx, job in enumerate(batch)]
+        work = [
+            self._ensure_ids(job, start_index + idx) for idx, job in enumerate(batch)
+        ]
         return JobClaim(work, None)
 
 

@@ -1,14 +1,16 @@
 import hashlib
+import importlib
 import socket
 import ssl
+from typing import Any
 
 try:
-    import pyasn
+    pyasn: Any = importlib.import_module("pyasn")
 except Exception:
     pyasn = None
 
 try:
-    import jarm
+    jarm: Any = importlib.import_module("jarm")
 except Exception:
     jarm = None
 
@@ -118,7 +120,7 @@ def collect_tls_info(hostname, timeout_ms):
         ) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as tls_sock:
                 cert_der = tls_sock.getpeercert(binary_form=True)
-                cert = tls_sock.getpeercert()
+                cert = tls_sock.getpeercert() or {}
                 sha1 = hashlib.sha1(cert_der).hexdigest() if cert_der else None
                 sha256 = hashlib.sha256(cert_der).hexdigest() if cert_der else None
                 subject = format_x509_name(cert.get("subject"))
@@ -133,4 +135,3 @@ def collect_tls_info(hostname, timeout_ms):
                 }
     except Exception as error:
         return {"error_type": "tls_error", "error_detail": str(error)[:200]}
-

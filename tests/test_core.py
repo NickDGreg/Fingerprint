@@ -1,4 +1,9 @@
-from fingerprint_core import collect_asset_urls, extract_trackers, looks_like_html, normalize_html_text
+from fingerprint_core import (
+    collect_asset_urls,
+    extract_trackers,
+    looks_like_html,
+    normalize_html_text,
+)
 
 
 def test_extract_trackers():
@@ -40,4 +45,4 @@ def test_normalize_html_text():
 def test_looks_like_html():
     assert looks_like_html("text/html", "<html><head></head></html>")
     assert looks_like_html(None, "<html><head></head>")
-    assert not looks_like_html("application/json", "{\"ok\": true}")
+    assert not looks_like_html("application/json", '{"ok": true}')

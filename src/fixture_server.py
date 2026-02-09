@@ -1,5 +1,6 @@
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 FIXTURE_HTML = """<!doctype html>
 <html lang=\"en\">
@@ -45,7 +46,7 @@ FIXTURE_FAVICON = (
 
 
 class FixtureHandler(BaseHTTPRequestHandler):
-    def log_message(self, _format, *_args):
+    def log_message(self, format: str, *args: Any) -> None:
         return None
 
     def _send(self, status, body, content_type="text/plain", headers=None):
@@ -85,7 +86,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if self.path == "/sitemap.xml":
             return self._send(
                 200,
-                b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset></urlset>",
+                b'<?xml version="1.0" encoding="UTF-8"?><urlset></urlset>',
                 "application/xml",
             )
 
@@ -121,4 +122,3 @@ def start_fixture_server(host="127.0.0.1", port=0):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return FixtureServer(server, thread)
-

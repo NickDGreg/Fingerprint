@@ -34,12 +34,14 @@ def test_fixture_smoke():
             {"host": host, "url": f"{base_url}/"},
         ]
 
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as handle:
-            handle.write("{\"jobs\": [")
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as handle:
+            handle.write('{"jobs": [')
             handle.write(
                 ",".join(
                     [
-                        f"{{\"host\": \"{job['host']}\", \"url\": \"{job['url']}\"}}"
+                        f'{{"host": "{job["host"]}", "url": "{job["url"]}"}}'
                         for job in jobs
                     ]
                 )
