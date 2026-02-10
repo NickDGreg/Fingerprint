@@ -1,0 +1,51 @@
+# Allow project venv tooling without prompts.
+prefix_rule(
+    pattern = [".venv/bin/uv"],
+    decision = "allow",
+    justification = "Allow running project uv commands (tests, lint, format, typecheck).",
+    match = [
+        ".venv/bin/uv run pytest",
+        ".venv/bin/uv run ruff check .",
+        ".venv/bin/uv run ruff format .",
+        ".venv/bin/uv run ty check .",
+        ".venv/bin/uv run python scripts/run_fixture_smoke.py",
+    ],
+)
+
+prefix_rule(
+    pattern = [".venv/bin/python"],
+    decision = "allow",
+    justification = "Allow running project venv Python directly.",
+    match = [
+        ".venv/bin/python -m pytest",
+        ".venv/bin/python scripts/run_fixture_smoke.py",
+    ],
+)
+
+prefix_rule(
+    pattern = [".venv/bin/pytest"],
+    decision = "allow",
+    justification = "Allow running pytest from the project venv.",
+    match = [
+        ".venv/bin/pytest",
+    ],
+)
+
+prefix_rule(
+    pattern = [".venv/bin/ruff"],
+    decision = "allow",
+    justification = "Allow running ruff from the project venv.",
+    match = [
+        ".venv/bin/ruff check .",
+        ".venv/bin/ruff format .",
+    ],
+)
+
+prefix_rule(
+    pattern = [".venv/bin/ty"],
+    decision = "allow",
+    justification = "Allow running ty from the project venv.",
+    match = [
+        ".venv/bin/ty check .",
+    ],
+)

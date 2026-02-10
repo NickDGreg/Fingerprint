@@ -1,16 +1,21 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-
 ENV PYTHONUNBUFFERED=1
 
-COPY pyproject.toml ./
-COPY src ./src
-
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential libfuzzy-dev \
-  && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends \
+    build-essential \
+    libfuzzy-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir beautifulsoup4 convex jarm mmh3 pyasn requests ssdeep
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+COPY pyproject.toml uv.lock ./
+
+# Install only runtime deps, system-wide
+RUN uv sync --frozen --no-dev --system
+
+COPY src ./src
 
 CMD ["python", "src/worker.py"]

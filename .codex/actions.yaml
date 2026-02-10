@@ -1,0 +1,12 @@
+version: 1
+actions:
+  - name: lint
+    command: uv run ruff check .
+  - name: format
+    command: uv run ruff format .
+  - name: typecheck
+    command: uv run ty check .
+  - name: test
+    command: uv run pytest
+  - name: smoke
+    command: uv run python scripts/run_fixture_smoke.py

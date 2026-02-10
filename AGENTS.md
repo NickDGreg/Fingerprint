@@ -105,6 +105,8 @@ Logs, run records, and timestamps are first-class outputs.
 - The same container must run locally and in production.
 - Behaviour differences are controlled via explicit config flags.
 - Keep dependencies minimal; prefer the Python standard library and `uv` for local envs.
+- Use the project virtual environment at `.venv` for all Python and tooling.
+- Use the `uv` executable from the project venv (`.venv/bin/uv`) rather than a system/global install.
 
 ---
 
@@ -117,3 +119,17 @@ Logs, run records, and timestamps are first-class outputs.
 - Break down the code following software engineering best practices, we do not want one single file that does everything, we need compartmentalised, testable, debuggable code
 
 The agent should always optimise for **clarity over cleverness**.
+
+---
+
+## Verification Commands
+
+After making code changes, you must verify code quality.
+
+Run these from the repo root and ensure all are clear:
+
+- `.venv/bin/uv run ruff check .` (lint)
+- `.venv/bin/uv run ruff format .` (format)
+- `.venv/bin/uv run ty check .` (typecheck)
+- `.venv/bin/uv run pytest` (tests)
+- `.venv/bin/uv run python scripts/run_fixture_smoke.py` (smoke: fixture server + file job source)
