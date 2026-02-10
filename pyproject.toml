@@ -18,6 +18,7 @@ dev = [
   "ruff",
   "pytest",
   "ty>=0.0.15",
+  "uv>=0.10.0",
 ]
 
 [tool.uv]
