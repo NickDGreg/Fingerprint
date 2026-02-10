@@ -6,5 +6,4 @@ npm-debug.log
 __pycache__
 .pytest_cache
 *.pyc
-uv.lock
 .python-version
