@@ -73,6 +73,9 @@ Required:
 - `CONVEX_URL` — Convex deployment URL from `npx convex dev` (local) or the deployed environment.
 
 Optional:
+- `WORKER_ENV` — worker environment label (`development` or `production`, default: `production`).
+- `WORKER_LOG_LEVEL` — Python log level (`DEBUG`, `INFO`, etc). Defaults to `DEBUG` in development and `INFO` in production.
+- `WORKER_LOG_HTTP_DETAILS` — set to `1` to include redirect/header details in logs (default: `1` in development, `0` in production).
 - `WORKER_ID` — explicit identifier for logs and lease ownership (default: random UUID).
 - `WORKER_POLL_INTERVAL_MS` — idle wait before polling again (default: `5000`).
 - `WORKER_BATCH_SIZE` — domains to claim per loop (default: `1`).
@@ -157,9 +160,14 @@ If you want to change dependencies, use `uv add <package>` and re-run `uv sync`.
 ## Deployment Model
 
 - One VM
-- One running worker process
-- No special infrastructure requirements beyond Docker
-- CI builds the image; deployment pulls and restarts it
+- Two isolated deployment folders:
+  - `/home/github/fingerprint-dev`
+  - `/home/github/fingerprint-prod`
+- One worker process per environment
+- CI builds an environment-specific image tag and deploys into the matching folder
+- Branch mapping:
+  - `dev` or `develop` → `dev`
+  - `main` → `prod`
 
 The system is intentionally simple.
 
@@ -167,19 +175,76 @@ The system is intentionally simple.
 
 ## CI/CD Deployment
 
-On each push to `main`, GitHub Actions builds the Docker image, tags it with the commit SHA and `latest`, pushes to GHCR, then deploys to the VM over SSH by updating `/home/github/fingerprint/compose.yml` and running `docker compose pull` + `docker compose up -d`.
+On each push to `main`, `dev`, or `develop`, GitHub Actions:
+1. Maps the branch to a deployment environment (`prod` or `dev`).
+2. Builds and pushes environment-scoped image tags:
+   - `ghcr.io/<repo>:latest-prod` / `ghcr.io/<repo>:<sha>-prod`
+   - `ghcr.io/<repo>:latest-dev` / `ghcr.io/<repo>:<sha>-dev`
+3. Deploys over SSH to the matching VM directory and runs:
+   - `docker compose pull`
+   - `docker compose up -d`
 
 VM requirements:
 - Docker installed and running.
 - `github` user exists with SSH access.
-- `/home/github/fingerprint/.env` is present with required worker environment variables.
+- `/home/github/fingerprint-dev/.env` is present with required worker environment variables for dev Convex.
+- `/home/github/fingerprint-prod/.env` is present with required worker environment variables for prod Convex.
 - The VM is already logged into GHCR (`docker login ghcr.io`).
+- GitHub secrets are set:
+  - Either shared: `VM_IP`, `SSH_PRIVATE_KEY`
+  - Or per env: `DEV_VM_IP` / `PROD_VM_IP`, `DEV_SSH_PRIVATE_KEY` / `PROD_SSH_PRIVATE_KEY`
+
+### VM setup (one-time)
+
+```bash
+ssh github@<vm-ip>
+
+mkdir -p /home/github/fingerprint-dev /home/github/fingerprint-prod
+```
+
+Create `/home/github/fingerprint-dev/.env`:
+
+```bash
+cat >/home/github/fingerprint-dev/.env <<'EOF'
+CONVEX_URL=https://<your-dev-convex-deployment>
+WORKER_ENV=development
+WORKER_LOG_LEVEL=DEBUG
+WORKER_LOG_HTTP_DETAILS=1
+WORKER_BATCH_SIZE=1
+WORKER_POLL_INTERVAL_MS=5000
+EOF
+```
+
+Create `/home/github/fingerprint-prod/.env`:
+
+```bash
+cat >/home/github/fingerprint-prod/.env <<'EOF'
+CONVEX_URL=https://<your-prod-convex-deployment>
+WORKER_ENV=production
+WORKER_LOG_LEVEL=INFO
+WORKER_LOG_HTTP_DETAILS=0
+WORKER_BATCH_SIZE=1
+WORKER_POLL_INTERVAL_MS=5000
+EOF
+```
+
+Optional hardening:
+
+```bash
+chmod 600 /home/github/fingerprint-dev/.env /home/github/fingerprint-prod/.env
+```
+
+You can use `.env.dev.example` and `.env.prod.example` in this repo as templates.
 
 Rollback (from the VM):
 ```bash
-cd /home/github/fingerprint
-IMAGE_TAG=<previous-sha> docker compose pull
-IMAGE_TAG=<previous-sha> docker compose up -d
+cd /home/github/fingerprint-prod
+IMAGE_TAG=<previous-sha>-prod docker compose pull
+IMAGE_TAG=<previous-sha>-prod docker compose up -d
+
+cd /home/github/fingerprint-dev
+IMAGE_TAG=<previous-sha>-dev docker compose pull
+IMAGE_TAG=<previous-sha>-dev docker compose up -d
 ```
 
 ## Design Principles

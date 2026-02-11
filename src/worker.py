@@ -1,4 +1,5 @@
 import base64
+import logging
 import os
 import signal
 import sys
@@ -44,6 +45,9 @@ from worker_io import (
     MemoryResultSink,
 )
 
+LOGGER = logging.getLogger("fingerprint.worker")
+VALID_LOG_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
+
 
 def now_ms():
     return int(time.time() * 1000)
@@ -61,11 +65,20 @@ def parse_number(raw_value, fallback, minimum=None):
     return value
 
 
+def parse_bool(raw_value, fallback):
+    if raw_value is None or raw_value == "":
+        return fallback
+    normalized = raw_value.strip().lower()
+    return normalized in {"1", "true", "yes", "on"}
+
+
 def call_mutation(sink, name, payload):
     try:
-        return sink.mutation(name, payload)
+        result = sink.mutation(name, payload)
+        LOGGER.debug("mutation succeeded name=%s", name)
+        return result
     except Exception as error:
-        print(f"[worker] mutation failed name={name} error={error}")
+        LOGGER.exception("mutation failed name=%s error=%s", name, error)
         return None
 
 
@@ -123,10 +136,28 @@ class WorkerConfig:
     fingerprint_disable_jarm: bool
     fingerprint_disable_tls: bool
     fingerprint_user_agent: str
+    worker_environment: str
+    log_level: str
+    log_http_details: bool
     max_loops: int | None
 
 
 def build_config(env):
+    worker_environment_raw = (env.get("WORKER_ENV") or "production").strip().lower()
+    if worker_environment_raw in {"dev", "development"}:
+        worker_environment = "development"
+    else:
+        worker_environment = "production"
+
+    default_log_level = "DEBUG" if worker_environment == "development" else "INFO"
+    log_level = (env.get("WORKER_LOG_LEVEL") or default_log_level).upper()
+    if log_level not in VALID_LOG_LEVELS:
+        log_level = default_log_level
+
+    log_http_details = parse_bool(
+        env.get("WORKER_LOG_HTTP_DETAILS"), worker_environment == "development"
+    )
+
     worker_id = env.get("WORKER_ID") or f"worker-{uuid.uuid4()}"
     poll_interval_ms = parse_number(env.get("WORKER_POLL_INTERVAL_MS"), 5000, 1000)
     batch_size = parse_number(env.get("WORKER_BATCH_SIZE"), 1, 1)
@@ -201,7 +232,18 @@ def build_config(env):
         fingerprint_disable_jarm=fingerprint_disable_jarm,
         fingerprint_disable_tls=fingerprint_disable_tls,
         fingerprint_user_agent=fingerprint_user_agent,
+        worker_environment=worker_environment,
+        log_level=log_level,
+        log_http_details=log_http_details,
         max_loops=max_loops,
+    )
+
+
+def configure_logging(config):
+    level = getattr(logging, config.log_level, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s [worker] %(message)s",
     )
 
 
@@ -224,12 +266,12 @@ def build_convex_client(env):
         if auth_token and hasattr(client, "set_auth"):
             client.set_auth(auth_token)
         elif auth_token:
-            print(
-                "[worker] auth token provided but Convex SDK does not support set_auth"
+            LOGGER.warning(
+                "auth token provided but Convex SDK does not support set_auth"
             )
         if admin_key:
-            print(
-                "[worker] admin key provided but Convex SDK did not accept it in constructor"
+            LOGGER.warning(
+                "admin key provided but Convex SDK did not accept it in constructor"
             )
     return client
 
@@ -239,18 +281,22 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
 
     def handle_signal(_signum, _frame):
         shutting_down["value"] = True
-        print("[worker] shutdown requested")
+        LOGGER.info("shutdown requested")
 
     if install_signal_handlers:
         signal.signal(signal.SIGINT, handle_signal)
         signal.signal(signal.SIGTERM, handle_signal)
 
-    print(
-        "[worker] starting "
-        f"id={config.worker_id} batchSize={config.batch_size} "
-        f"pollIntervalMs={config.poll_interval_ms} "
-        f"fingerprintTimeoutMs={config.fingerprint_timeout_ms} "
-        f"htmlMaxBytes={config.fingerprint_html_max_bytes}"
+    LOGGER.info(
+        "starting id=%s env=%s logLevel=%s batchSize=%s pollIntervalMs=%s "
+        "fingerprintTimeoutMs=%s htmlMaxBytes=%s",
+        config.worker_id,
+        config.worker_environment,
+        config.log_level,
+        config.batch_size,
+        config.poll_interval_ms,
+        config.fingerprint_timeout_ms,
+        config.fingerprint_html_max_bytes,
     )
 
     asn_db = None
@@ -258,11 +304,11 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
     if not config.fingerprint_disable_tls:
         asn_db, asn_error = load_asn_db(config.fingerprint_asn_db_path)
         if asn_error:
-            print(f"[worker] ASN lookup disabled: {asn_error}")
+            LOGGER.warning("ASN lookup disabled: %s", asn_error)
         if config.fingerprint_disable_jarm:
-            print("[worker] JARM disabled via FINGERPRINT_DISABLE_JARM=1")
+            LOGGER.info("JARM disabled via FINGERPRINT_DISABLE_JARM=1")
     if config.fingerprint_disable_tls:
-        print("[worker] TLS fingerprinting disabled via FINGERPRINT_DISABLE_TLS=1")
+        LOGGER.info("TLS fingerprinting disabled via FINGERPRINT_DISABLE_TLS=1")
 
     loop_count = 0
     while not shutting_down["value"]:
@@ -275,7 +321,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
             lease_expires_at = claim.lease_expires_at
 
             if not work:
-                print("[worker] idle")
+                LOGGER.debug("idle loop=%s", loop_count)
                 if config.max_loops and loop_count >= config.max_loops:
                     break
                 time.sleep(config.poll_interval_ms / 1000)
@@ -288,7 +334,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                 if lease_expires_at
                 else "unknown"
             )
-            print(f"[worker] claimed {len(work)} domains leaseExpiresAt={expires}")
+            LOGGER.info("claimed count=%s leaseExpiresAt=%s", len(work), expires)
 
             for item in work:
                 if shutting_down["value"]:
@@ -297,6 +343,13 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                 domain_id = item.get("domainId")
                 requested_url = item.get("url") or f"https://{item.get('host')}"
                 fetched_at = now_ms()
+                LOGGER.debug(
+                    "processing host=%s domainId=%s runId=%s requestedUrl=%s",
+                    item.get("host"),
+                    domain_id,
+                    scan_id,
+                    requested_url,
+                )
 
                 http_result = fetch_http(
                     requested_url,
@@ -320,6 +373,24 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                 )
                 status = outcome.get("kind")
                 error_message = outcome.get("detail")
+                LOGGER.debug(
+                    "http result host=%s runId=%s status=%s httpStatus=%s durationMs=%s bodyBytes=%s",
+                    item.get("host"),
+                    scan_id,
+                    status,
+                    http_result.get("status"),
+                    http_result.get("duration_ms"),
+                    len(body_bytes),
+                )
+                if config.log_http_details:
+                    LOGGER.debug(
+                        "http details host=%s runId=%s finalUrl=%s redirects=%s headers=%s",
+                        item.get("host"),
+                        scan_id,
+                        http_result.get("final_url"),
+                        http_result.get("redirect_chain") or [],
+                        http_result.get("headers") or [],
+                    )
 
                 http_payload = strip_nones(
                     {
@@ -378,6 +449,13 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     html_payload.update(
                         {"errorType": "no_html", "errorDetail": "no html body"}
                     )
+                LOGGER.debug(
+                    "html fingerprint host=%s runId=%s htmlOk=%s htmlLength=%s",
+                    item.get("host"),
+                    scan_id,
+                    html_ok,
+                    len(body_bytes),
+                )
 
                 call_mutation(
                     sink,
@@ -488,6 +566,14 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     )
 
                     favicon_url = find_favicon_url(base_url, html_text)
+                    LOGGER.debug(
+                        "asset analysis host=%s runId=%s localAssets=%s externalDomains=%s filteredExternalDomains=%s",
+                        item.get("host"),
+                        scan_id,
+                        len(local_assets),
+                        len(external_domains),
+                        len(filtered_external),
+                    )
                 else:
                     assets_payload.update(
                         {"errorType": "no_html", "errorDetail": "no html body"}
@@ -497,6 +583,11 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     )
                     favicon_url = (
                         urlparse(base_url)._replace(path="/favicon.ico").geturl()
+                    )
+                    LOGGER.debug(
+                        "asset analysis skipped host=%s runId=%s reason=no_html",
+                        item.get("host"),
+                        scan_id,
                     )
 
                 call_mutation(
@@ -535,6 +626,13 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                             "recordedAt": fetched_at,
                         }
                     )
+                    LOGGER.debug(
+                        "favicon fingerprint host=%s runId=%s status=%s contentLength=%s",
+                        item.get("host"),
+                        scan_id,
+                        favicon_result.get("status"),
+                        favicon_result.get("content_length"),
+                    )
                 else:
                     favicon_payload = strip_nones(
                         {
@@ -545,6 +643,12 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                             "errorDetail": favicon_result.get("error_detail"),
                             "recordedAt": fetched_at,
                         }
+                    )
+                    LOGGER.debug(
+                        "favicon fetch failed host=%s runId=%s errorType=%s",
+                        item.get("host"),
+                        scan_id,
+                        favicon_result.get("error_type"),
                     )
 
                 call_mutation(
@@ -566,6 +670,11 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                             "errorDetail": "tls_disabled",
                             "recordedAt": fetched_at,
                         }
+                    )
+                    LOGGER.debug(
+                        "tls fingerprint skipped host=%s runId=%s reason=tls_disabled",
+                        item.get("host"),
+                        scan_id,
                     )
                 else:
                     ip_addresses = resolve_ips(parsed_host)
@@ -608,6 +717,14 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                             "recordedAt": fetched_at,
                         }
                     )
+                    LOGGER.debug(
+                        "tls fingerprint host=%s runId=%s ipCount=%s jarmTodo=%s asnTodo=%s",
+                        parsed_host,
+                        scan_id,
+                        len(ip_addresses),
+                        jarm_todo,
+                        asn_todo,
+                    )
 
                 call_mutation(sink, "fingerprints:upsertTlsFingerprint", tls_payload)
 
@@ -625,29 +742,36 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                             }
                         ),
                     )
-                    print(
-                        f"[worker] processed host={item.get('host')} runId={scan_id} status={status}"
+                    LOGGER.info(
+                        "processed host=%s runId=%s status=%s",
+                        item.get("host"),
+                        scan_id,
+                        status,
                     )
                 except Exception as error:
-                    print(
-                        f"[worker] failed host={item.get('host')} runId={scan_id} error={error}"
+                    LOGGER.exception(
+                        "failed host=%s runId=%s error=%s",
+                        item.get("host"),
+                        scan_id,
+                        error,
                     )
 
             if config.max_loops and loop_count >= config.max_loops:
                 break
         except Exception as error:
-            print(f"[worker] loop error={error}")
+            LOGGER.exception("loop error=%s", error)
             if config.max_loops and loop_count >= config.max_loops:
                 break
             time.sleep(config.poll_interval_ms / 1000)
 
     sink.close()
-    print("[worker] stopped")
+    LOGGER.info("stopped")
 
 
 def main():
     env = os.environ
     config = build_config(env)
+    configure_logging(config)
 
     job_source_kind = (env.get("JOB_SOURCE") or "convex").lower()
     result_sink_kind = env.get("RESULT_SINK")
@@ -662,7 +786,7 @@ def main():
 
     client = build_convex_client(env) if needs_convex else None
     if needs_convex and client is None:
-        print("Missing CONVEX_URL; set it to your Convex deployment URL.")
+        LOGGER.error("Missing CONVEX_URL; set it to your Convex deployment URL.")
         sys.exit(1)
 
     if job_source_kind == "convex":
@@ -670,7 +794,7 @@ def main():
     elif job_source_kind == "file":
         job_source = FileJobSource(job_file)
     else:
-        print(f"Unknown JOB_SOURCE={job_source_kind}")
+        LOGGER.error("Unknown JOB_SOURCE=%s", job_source_kind)
         sys.exit(1)
 
     if result_sink_kind == "convex":
@@ -680,7 +804,7 @@ def main():
     elif result_sink_kind == "memory":
         sink = MemoryResultSink()
     else:
-        print(f"Unknown RESULT_SINK={result_sink_kind}")
+        LOGGER.error("Unknown RESULT_SINK=%s", result_sink_kind)
         sys.exit(1)
 
     run_worker(config, job_source, sink, install_signal_handlers=True)
