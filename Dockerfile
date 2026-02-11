@@ -17,4 +17,4 @@ RUN uv sync --frozen --no-dev
 
 COPY src ./src
 
-CMD ["python", "src/worker.py"]
+CMD ["/app/.venv/bin/python", "src/worker.py"]
