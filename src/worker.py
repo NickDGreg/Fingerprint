@@ -373,6 +373,9 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                 )
                 status = outcome.get("kind")
                 error_message = outcome.get("detail")
+                headers_truncated = http_result.get("headers_truncated")
+                if headers_truncated is None:
+                    headers_truncated = False
                 LOGGER.debug(
                     "http result host=%s runId=%s status=%s httpStatus=%s durationMs=%s bodyBytes=%s",
                     item.get("host"),
@@ -401,16 +404,16 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         "status": http_result.get("status"),
                         "redirectChain": http_result.get("redirect_chain") or [],
                         "headers": http_result.get("headers") or [],
-                        "headersTruncated": http_result.get("headers_truncated"),
                         "contentType": http_result.get("content_type"),
                         "contentLength": http_result.get("content_length"),
                         "durationMs": http_result.get("duration_ms"),
-                        "recordedAt": fetched_at,
+                        "fetchedAt": fetched_at,
                         "server": http_result.get("server"),
                         "poweredBy": http_result.get("powered_by"),
                         "setCookie": http_result.get("set_cookie") or [],
                         "errorType": http_result.get("error_type"),
                         "errorDetail": http_result.get("error_detail"),
+                        "headersTruncated": bool(headers_truncated),
                     }
                 )
                 call_mutation(sink, "fingerprints:upsertHttpFingerprint", http_payload)

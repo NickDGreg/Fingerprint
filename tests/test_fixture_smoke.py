@@ -64,6 +64,8 @@ def test_fixture_smoke():
         grouped = _records_by_name(sink.records)
         http_payload = grouped["fingerprints:upsertHttpFingerprint"][0]
         assert http_payload["status"] == 200
+        assert "fetchedAt" in http_payload
+        assert isinstance(http_payload["headersTruncated"], bool)
         assert any(
             header.get("key") == "X-Test-Header" and header.get("value") == "fixture"
             for header in http_payload.get("headers", [])
