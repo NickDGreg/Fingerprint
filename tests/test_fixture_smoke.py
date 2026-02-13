@@ -90,5 +90,9 @@ def test_fixture_smoke():
         favicon_payload = grouped["fingerprints:upsertFaviconFingerprint"][0]
         expected_mmh3 = mmh3.hash(base64.b64encode(FIXTURE_FAVICON), signed=False)
         assert favicon_payload["mmh3"] == expected_mmh3
+
+        report_payload = grouped["fingerprints:reportResult"][0]
+        assert report_payload["status"] == "success"
+        assert report_payload["outcome"]["kind"] == "http_content"
     finally:
         server.close()

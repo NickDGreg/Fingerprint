@@ -48,6 +48,36 @@ from worker_io import (
 LOGGER = logging.getLogger("fingerprint.worker")
 VALID_LOG_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
 
+RUN_STATUS_RUNNING = "running"
+RUN_STATUS_SUCCESS = "success"
+RUN_STATUS_ERROR = "error"
+RUN_STATUS_FAILED = "failed"
+RUN_STATUS_ABANDONED = "abandoned"
+RUN_STATUS_UNREACHABLE = "unreachable"
+
+RUN_OUTCOME_HTTP_CONTENT = "http_content"
+RUN_OUTCOME_HTTP_ERROR = "http_error"
+RUN_OUTCOME_UNREACHABLE = "unreachable"
+RUN_OUTCOME_WORKER_EXCEPTION = "worker_exception"
+
+RUN_ISSUE_STAGE_UPSERT_HTTP = "upsert_http"
+RUN_ISSUE_STAGE_UPSERT_HTML = "upsert_html"
+RUN_ISSUE_STAGE_UPSERT_ASSETS = "upsert_assets"
+RUN_ISSUE_STAGE_UPSERT_ANALYTICS = "upsert_analytics"
+RUN_ISSUE_STAGE_UPSERT_FAVICON = "upsert_favicon"
+RUN_ISSUE_STAGE_UPSERT_TLS = "upsert_tls"
+RUN_ISSUE_STAGE_REPORT_RESULT = "report_result"
+RUN_ISSUE_STAGE_PROCESSING = "processing"
+
+RUN_ISSUE_CODE_MUTATION_EXCEPTION = "mutation_exception"
+RUN_ISSUE_CODE_REPORT_RESULT_EXCEPTION = "report_result_exception"
+RUN_ISSUE_CODE_REPORT_RESULT_REJECTED = "report_result_rejected"
+RUN_ISSUE_CODE_PROCESSING_EXCEPTION = "processing_exception"
+
+ISSUE_MESSAGE_MAX_LEN = 500
+ISSUE_DETAIL_MAX_LEN = 4000
+RUN_ERROR_MAX_LEN = 500
+
 
 def now_ms():
     return int(time.time() * 1000)
@@ -72,20 +102,162 @@ def parse_bool(raw_value, fallback):
     return normalized in {"1", "true", "yes", "on"}
 
 
-def call_mutation(sink, name, payload):
+def clamp_text(value, max_len):
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:max_len]
+
+
+def map_outcome_kind_to_run_status(kind):
+    if kind in {RUN_OUTCOME_HTTP_CONTENT, RUN_OUTCOME_HTTP_ERROR}:
+        return RUN_STATUS_SUCCESS
+    if kind == RUN_OUTCOME_UNREACHABLE:
+        return RUN_STATUS_UNREACHABLE
+    return RUN_STATUS_FAILED
+
+
+def build_issue_dedupe_key(run_id, stage, code):
+    return f"fp-issue:{run_id}:{stage}:{code}"
+
+
+def record_run_issue(
+    sink,
+    run_id,
+    domain_id,
+    worker_id,
+    stage,
+    code,
+    message,
+    detail=None,
+):
+    payload = strip_nones(
+        {
+            "runId": run_id,
+            "domainId": domain_id,
+            "workerId": worker_id,
+            "stage": stage,
+            "code": code,
+            "message": clamp_text(message, ISSUE_MESSAGE_MAX_LEN)
+            or "fingerprint issue",
+            "detail": clamp_text(detail, ISSUE_DETAIL_MAX_LEN),
+            "dedupeKey": build_issue_dedupe_key(run_id, stage, code),
+        }
+    )
     try:
-        result = sink.mutation(name, payload)
-        LOGGER.debug("mutation succeeded name=%s", name)
+        sink.mutation("fingerprints:recordRunIssue", payload)
+        LOGGER.debug(
+            "mutation succeeded name=fingerprints:recordRunIssue stage=%s code=%s",
+            stage,
+            code,
+        )
+        return True
+    except Exception as error:
+        LOGGER.exception(
+            "mutation failed name=fingerprints:recordRunIssue stage=%s code=%s error=%s",
+            stage,
+            code,
+            error,
+        )
+        return False
+
+
+def call_stage_mutation(
+    sink,
+    mutation_name,
+    payload,
+    run_id,
+    domain_id,
+    worker_id,
+    stage,
+    stage_errors,
+):
+    try:
+        result = sink.mutation(mutation_name, payload)
+        LOGGER.debug("mutation succeeded name=%s", mutation_name)
         return result
     except Exception as error:
-        LOGGER.exception("mutation failed name=%s error=%s", name, error)
+        error_text = clamp_text(error, ISSUE_DETAIL_MAX_LEN) or "unknown_error"
+        LOGGER.exception("mutation failed name=%s error=%s", mutation_name, error)
+        stage_errors.append(f"{stage}:{error_text}")
+        record_run_issue(
+            sink,
+            run_id,
+            domain_id,
+            worker_id,
+            stage,
+            RUN_ISSUE_CODE_MUTATION_EXCEPTION,
+            f"{mutation_name} failed",
+            error_text,
+        )
         return None
+
+
+def finalize_run(
+    sink,
+    host,
+    run_id,
+    domain_id,
+    worker_id,
+    status,
+    outcome,
+    error_message,
+):
+    payload = strip_nones(
+        {
+            "domainId": domain_id,
+            "runId": run_id,
+            "workerId": worker_id,
+            "status": status,
+            "outcome": outcome,
+            "error": clamp_text(error_message, RUN_ERROR_MAX_LEN),
+        }
+    )
+    try:
+        result = sink.mutation("fingerprints:reportResult", payload)
+        if isinstance(result, dict) and result.get("ok") is False:
+            reason = result.get("reason") or "unknown_reason"
+            LOGGER.error(
+                "reportResult rejected host=%s runId=%s reason=%s",
+                host,
+                run_id,
+                reason,
+            )
+            record_run_issue(
+                sink,
+                run_id,
+                domain_id,
+                worker_id,
+                RUN_ISSUE_STAGE_REPORT_RESULT,
+                RUN_ISSUE_CODE_REPORT_RESULT_REJECTED,
+                "reportResult returned ok=false",
+                f"reason={reason}",
+            )
+            return False
+        LOGGER.info("processed host=%s runId=%s status=%s", host, run_id, status)
+        return True
+    except Exception as error:
+        error_text = clamp_text(error, ISSUE_DETAIL_MAX_LEN) or "unknown_error"
+        LOGGER.exception("reportResult failed host=%s runId=%s error=%s", host, run_id, error)
+        record_run_issue(
+            sink,
+            run_id,
+            domain_id,
+            worker_id,
+            RUN_ISSUE_STAGE_REPORT_RESULT,
+            RUN_ISSUE_CODE_REPORT_RESULT_EXCEPTION,
+            "reportResult mutation failed",
+            error_text,
+        )
+        return False
 
 
 def build_run_outcome(http_result, sample_bytes, sample_truncated):
     if http_result.get("ok"):
         status = http_result.get("status") or 0
-        kind = "http_content" if status < 400 else "http_error"
+        kind = RUN_OUTCOME_HTTP_CONTENT if status < 400 else RUN_OUTCOME_HTTP_ERROR
         detail = f"http_status {status}" if status >= 400 else None
         return strip_nones(
             {
@@ -104,7 +276,7 @@ def build_run_outcome(http_result, sample_bytes, sample_truncated):
         )
     return strip_nones(
         {
-            "kind": "unreachable",
+            "kind": RUN_OUTCOME_UNREACHABLE,
             "detail": http_result.get("error_detail"),
             "errorType": http_result.get("error_type"),
             "durationMs": http_result.get("duration_ms"),
@@ -343,6 +515,10 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                 domain_id = item.get("domainId")
                 requested_url = item.get("url") or f"https://{item.get('host')}"
                 fetched_at = now_ms()
+                run_status = RUN_STATUS_ERROR
+                outcome = None
+                error_message = None
+                stage_errors = []
                 LOGGER.debug(
                     "processing host=%s domainId=%s runId=%s requestedUrl=%s",
                     item.get("host"),
@@ -350,413 +526,489 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     scan_id,
                     requested_url,
                 )
-
-                http_result = fetch_http(
-                    requested_url,
-                    config.fingerprint_timeout_ms,
-                    config.fingerprint_html_max_bytes,
-                    config.fingerprint_user_agent,
-                    config.fingerprint_max_headers,
-                    config.fingerprint_header_value_max,
-                    config.fingerprint_max_set_cookie,
-                    config.fingerprint_set_cookie_max,
-                )
-
-                body_bytes = http_result.get("body_bytes", b"") if http_result else b""
-                encoding = http_result.get("encoding", "utf-8")
-                sample_bytes = body_bytes[: config.fingerprint_sample_bytes]
-                sample_truncated = len(body_bytes) > len(sample_bytes)
-                outcome = build_run_outcome(
-                    http_result,
-                    sample_bytes,
-                    sample_truncated,
-                )
-                status = outcome.get("kind")
-                error_message = outcome.get("detail")
-                headers_truncated = http_result.get("headers_truncated")
-                if headers_truncated is None:
-                    headers_truncated = False
-                LOGGER.debug(
-                    "http result host=%s runId=%s status=%s httpStatus=%s durationMs=%s bodyBytes=%s",
-                    item.get("host"),
-                    scan_id,
-                    status,
-                    http_result.get("status"),
-                    http_result.get("duration_ms"),
-                    len(body_bytes),
-                )
-                if config.log_http_details:
-                    LOGGER.debug(
-                        "http details host=%s runId=%s finalUrl=%s redirects=%s headers=%s",
-                        item.get("host"),
-                        scan_id,
-                        http_result.get("final_url"),
-                        http_result.get("redirect_chain") or [],
-                        http_result.get("headers") or [],
+                try:
+                    http_result = fetch_http(
+                        requested_url,
+                        config.fingerprint_timeout_ms,
+                        config.fingerprint_html_max_bytes,
+                        config.fingerprint_user_agent,
+                        config.fingerprint_max_headers,
+                        config.fingerprint_header_value_max,
+                        config.fingerprint_max_set_cookie,
+                        config.fingerprint_set_cookie_max,
                     )
 
-                http_payload = strip_nones(
-                    {
+                    body_bytes = (
+                        http_result.get("body_bytes", b"") if http_result else b""
+                    )
+                    encoding = http_result.get("encoding", "utf-8")
+                    sample_bytes = body_bytes[: config.fingerprint_sample_bytes]
+                    sample_truncated = len(body_bytes) > len(sample_bytes)
+                    outcome = build_run_outcome(
+                        http_result,
+                        sample_bytes,
+                        sample_truncated,
+                    )
+                    run_status = map_outcome_kind_to_run_status(outcome.get("kind"))
+                    error_message = outcome.get("detail")
+                    headers_truncated = http_result.get("headers_truncated")
+                    if headers_truncated is None:
+                        headers_truncated = False
+                    LOGGER.debug(
+                        "http result host=%s runId=%s outcomeKind=%s runStatus=%s httpStatus=%s durationMs=%s bodyBytes=%s",
+                        item.get("host"),
+                        scan_id,
+                        outcome.get("kind"),
+                        run_status,
+                        http_result.get("status"),
+                        http_result.get("duration_ms"),
+                        len(body_bytes),
+                    )
+                    if config.log_http_details:
+                        LOGGER.debug(
+                            "http details host=%s runId=%s finalUrl=%s redirects=%s headers=%s",
+                            item.get("host"),
+                            scan_id,
+                            http_result.get("final_url"),
+                            http_result.get("redirect_chain") or [],
+                            http_result.get("headers") or [],
+                        )
+
+                    http_payload = strip_nones(
+                        {
+                            "scanId": scan_id,
+                            "domainId": domain_id,
+                            "requestedUrl": http_result.get("requested_url"),
+                            "finalUrl": http_result.get("final_url"),
+                            "status": http_result.get("status"),
+                            "redirectChain": http_result.get("redirect_chain") or [],
+                            "headers": http_result.get("headers") or [],
+                            "contentType": http_result.get("content_type"),
+                            "contentLength": http_result.get("content_length"),
+                            "durationMs": http_result.get("duration_ms"),
+                            "fetchedAt": fetched_at,
+                            "server": http_result.get("server"),
+                            "poweredBy": http_result.get("powered_by"),
+                            "setCookie": http_result.get("set_cookie") or [],
+                            "errorType": http_result.get("error_type"),
+                            "errorDetail": http_result.get("error_detail"),
+                            "headersTruncated": bool(headers_truncated),
+                        }
+                    )
+                    call_stage_mutation(
+                        sink,
+                        "fingerprints:upsertHttpFingerprint",
+                        http_payload,
+                        scan_id,
+                        domain_id,
+                        config.worker_id,
+                        RUN_ISSUE_STAGE_UPSERT_HTTP,
+                        stage_errors,
+                    )
+
+                    html_text = ""
+                    html_ok = False
+                    if body_bytes:
+                        html_text = decode_bytes(body_bytes, encoding)
+                        html_ok = looks_like_html(
+                            http_result.get("content_type"), html_text
+                        )
+
+                    html_payload = {
                         "scanId": scan_id,
                         "domainId": domain_id,
-                        "requestedUrl": http_result.get("requested_url"),
-                        "finalUrl": http_result.get("final_url"),
-                        "status": http_result.get("status"),
-                        "redirectChain": http_result.get("redirect_chain") or [],
-                        "headers": http_result.get("headers") or [],
-                        "contentType": http_result.get("content_type"),
-                        "contentLength": http_result.get("content_length"),
-                        "durationMs": http_result.get("duration_ms"),
-                        "fetchedAt": fetched_at,
-                        "server": http_result.get("server"),
-                        "poweredBy": http_result.get("powered_by"),
-                        "setCookie": http_result.get("set_cookie") or [],
-                        "errorType": http_result.get("error_type"),
-                        "errorDetail": http_result.get("error_detail"),
-                        "headersTruncated": bool(headers_truncated),
+                        "recordedAt": fetched_at,
                     }
-                )
-                call_mutation(sink, "fingerprints:upsertHttpFingerprint", http_payload)
 
-                html_text = ""
-                html_ok = False
-                if body_bytes:
-                    html_text = decode_bytes(body_bytes, encoding)
-                    html_ok = looks_like_html(
-                        http_result.get("content_type"), html_text
-                    )
-
-                html_payload = {
-                    "scanId": scan_id,
-                    "domainId": domain_id,
-                    "recordedAt": fetched_at,
-                }
-
-                if html_ok:
-                    sha256 = compute_sha256(body_bytes)
-                    normalized = normalize_html_text(html_text)
-                    normalized_sha256 = compute_sha256(normalized.encode("utf-8"))
-                    fuzzy_hash, fuzzy_todo = compute_fuzzy_hash(html_text)
-                    html_payload.update(
-                        {
-                            "sha256": sha256,
-                            "normalizedSha256": normalized_sha256,
-                            "fuzzyHash": fuzzy_hash,
-                            "fuzzyHashTodo": fuzzy_todo,
-                            "htmlLength": len(body_bytes),
-                            "truncated": http_result.get("body_truncated"),
-                            "storageTodo": True,
-                        }
-                    )
-                else:
-                    html_payload.update(
-                        {"errorType": "no_html", "errorDetail": "no html body"}
-                    )
-                LOGGER.debug(
-                    "html fingerprint host=%s runId=%s htmlOk=%s htmlLength=%s",
-                    item.get("host"),
-                    scan_id,
-                    html_ok,
-                    len(body_bytes),
-                )
-
-                call_mutation(
-                    sink,
-                    "fingerprints:upsertHtmlFingerprint",
-                    strip_nones(html_payload),
-                )
-
-                assets_payload = {
-                    "scanId": scan_id,
-                    "domainId": domain_id,
-                    "localAssets": [],
-                    "localAssetCount": 0,
-                    "externalDomains": [],
-                    "externalDomainsFiltered": [],
-                    "recordedAt": fetched_at,
-                }
-
-                analytics_payload = {
-                    "scanId": scan_id,
-                    "domainId": domain_id,
-                    "googleAnalyticsIds": [],
-                    "googleAnalytics4Ids": [],
-                    "gtmIds": [],
-                    "facebookPixelIds": [],
-                    "recordedAt": fetched_at,
-                }
-
-                favicon_payload = None
-
-                base_url = http_result.get("final_url") or requested_url
-                if html_ok:
-                    base_url = extract_base_url(base_url, html_text)
-                    asset_urls = collect_asset_urls(html_text, base_url)
-                    base_host = urlparse(base_url).hostname or ""
-                    local_assets = []
-                    external_domains = []
-
-                    for asset_url in asset_urls:
-                        parsed = urlparse(asset_url)
-                        host = parsed.hostname or ""
-                        if host_matches(host, base_host):
-                            local_assets.append(asset_url)
-                        else:
-                            external_domains.append(normalize_host(host))
-
-                    external_domains = list(
-                        dict.fromkeys(filter(None, external_domains))
-                    )
-                    filtered_external = [
-                        domain
-                        for domain in external_domains
-                        if not is_allowed_domain(domain, DEFAULT_EXTERNAL_ALLOWLIST)
-                    ]
-
-                    assets_payload["localAssetCount"] = len(local_assets)
-                    assets_payload["externalDomains"] = external_domains[
-                        : config.fingerprint_max_external_domains
-                    ]
-                    assets_payload["externalDomainsFiltered"] = filtered_external[
-                        : config.fingerprint_max_external_domains
-                    ]
-                    assets_payload["localAssetsTruncated"] = (
-                        len(local_assets) > config.fingerprint_max_assets
-                    )
-
-                    for asset_url in local_assets[: config.fingerprint_max_assets]:
-                        asset_result = fetch_binary(
-                            asset_url,
-                            config.fingerprint_asset_timeout_ms,
-                            config.fingerprint_asset_max_bytes,
-                            config.fingerprint_user_agent,
-                        )
-                        if asset_result.get("ok"):
-                            body = asset_result.get("body_bytes", b"")
-                            assets_payload["localAssets"].append(
-                                strip_nones(
-                                    {
-                                        "url": asset_url,
-                                        "sha256": compute_sha256(body)
-                                        if body
-                                        else None,
-                                        "contentType": asset_result.get("content_type"),
-                                        "contentLength": asset_result.get(
-                                            "content_length"
-                                        ),
-                                        "truncated": asset_result.get("body_truncated"),
-                                    }
-                                )
-                            )
-                        else:
-                            assets_payload["localAssets"].append(
-                                strip_nones(
-                                    {
-                                        "url": asset_url,
-                                        "errorType": asset_result.get("error_type"),
-                                    }
-                                )
-                            )
-
-                    ga_ids, ga4_ids, gtm_ids, fb_ids = extract_trackers(html_text)
-                    analytics_payload.update(
-                        {
-                            "googleAnalyticsIds": ga_ids,
-                            "googleAnalytics4Ids": ga4_ids,
-                            "gtmIds": gtm_ids,
-                            "facebookPixelIds": fb_ids,
-                        }
-                    )
-
-                    favicon_url = find_favicon_url(base_url, html_text)
-                    LOGGER.debug(
-                        "asset analysis host=%s runId=%s localAssets=%s externalDomains=%s filteredExternalDomains=%s",
-                        item.get("host"),
-                        scan_id,
-                        len(local_assets),
-                        len(external_domains),
-                        len(filtered_external),
-                    )
-                else:
-                    assets_payload.update(
-                        {"errorType": "no_html", "errorDetail": "no html body"}
-                    )
-                    analytics_payload.update(
-                        {"errorType": "no_html", "errorDetail": "no html body"}
-                    )
-                    favicon_url = (
-                        urlparse(base_url)._replace(path="/favicon.ico").geturl()
-                    )
-                    LOGGER.debug(
-                        "asset analysis skipped host=%s runId=%s reason=no_html",
-                        item.get("host"),
-                        scan_id,
-                    )
-
-                call_mutation(
-                    sink, "fingerprints:upsertAssetsFingerprint", assets_payload
-                )
-                call_mutation(
-                    sink, "fingerprints:upsertAnalyticsFingerprint", analytics_payload
-                )
-
-                favicon_result = fetch_binary(
-                    favicon_url,
-                    config.fingerprint_favicon_timeout_ms,
-                    config.fingerprint_favicon_max_bytes,
-                    config.fingerprint_user_agent,
-                )
-                if favicon_result.get("ok"):
-                    icon_bytes = favicon_result.get("body_bytes", b"")
-                    mmh3_hash = None
-                    if icon_bytes:
-                        mmh3_hash = mmh3.hash(
-                            base64.b64encode(icon_bytes), signed=False
-                        )
-                    favicon_payload = strip_nones(
-                        {
-                            "scanId": scan_id,
-                            "domainId": domain_id,
-                            "url": favicon_result.get("final_url") or favicon_url,
-                            "status": favicon_result.get("status"),
-                            "contentType": favicon_result.get("content_type"),
-                            "contentLength": favicon_result.get("content_length"),
-                            "sha256": compute_sha256(icon_bytes)
-                            if icon_bytes
-                            else None,
-                            "mmh3": mmh3_hash,
-                            "storageTodo": True,
-                            "recordedAt": fetched_at,
-                        }
-                    )
-                    LOGGER.debug(
-                        "favicon fingerprint host=%s runId=%s status=%s contentLength=%s",
-                        item.get("host"),
-                        scan_id,
-                        favicon_result.get("status"),
-                        favicon_result.get("content_length"),
-                    )
-                else:
-                    favicon_payload = strip_nones(
-                        {
-                            "scanId": scan_id,
-                            "domainId": domain_id,
-                            "url": favicon_url,
-                            "errorType": favicon_result.get("error_type"),
-                            "errorDetail": favicon_result.get("error_detail"),
-                            "recordedAt": fetched_at,
-                        }
-                    )
-                    LOGGER.debug(
-                        "favicon fetch failed host=%s runId=%s errorType=%s",
-                        item.get("host"),
-                        scan_id,
-                        favicon_result.get("error_type"),
-                    )
-
-                call_mutation(
-                    sink, "fingerprints:upsertFaviconFingerprint", favicon_payload
-                )
-
-                parsed_host = urlparse(base_url).hostname or ""
-
-                if config.fingerprint_disable_tls:
-                    tls_payload = strip_nones(
-                        {
-                            "scanId": scan_id,
-                            "domainId": domain_id,
-                            "hostname": parsed_host or None,
-                            "ipAddresses": [],
-                            "jarmTodo": True,
-                            "asnTodo": True,
-                            "errorType": "disabled",
-                            "errorDetail": "tls_disabled",
-                            "recordedAt": fetched_at,
-                        }
-                    )
-                    LOGGER.debug(
-                        "tls fingerprint skipped host=%s runId=%s reason=tls_disabled",
-                        item.get("host"),
-                        scan_id,
-                    )
-                else:
-                    ip_addresses = resolve_ips(parsed_host)
-                    tls_info = collect_tls_info(
-                        parsed_host, config.fingerprint_timeout_ms
-                    )
-                    asn_value = lookup_asn(asn_db, ip_addresses)
-                    asn_todo = asn_value is None
-                    asn_error_detail = asn_error if asn_todo else None
-                    if config.fingerprint_disable_jarm:
-                        jarm_value = None
-                        jarm_error = "jarm_disabled"
-                    else:
-                        jarm_value, jarm_error = compute_jarm(
-                            parsed_host, 443, config.fingerprint_jarm_timeout_ms
-                        )
-                    jarm_todo = jarm_value is None
-                    tls_payload = strip_nones(
-                        {
-                            "scanId": scan_id,
-                            "domainId": domain_id,
-                            "hostname": parsed_host or None,
-                            "ipAddresses": ip_addresses,
-                            "certSha1": tls_info.get("cert_sha1"),
-                            "certSha256": tls_info.get("cert_sha256"),
-                            "certSubject": tls_info.get("cert_subject"),
-                            "certIssuer": tls_info.get("cert_issuer"),
-                            "certNotBefore": tls_info.get("cert_not_before"),
-                            "certNotAfter": tls_info.get("cert_not_after"),
-                            "jarm": jarm_value,
-                            "jarmTodo": jarm_todo,
-                            "asn": asn_value,
-                            "asnTodo": asn_todo,
-                            "errorType": tls_info.get("error_type"),
-                            "errorDetail": join_errors(
-                                tls_info.get("error_detail"),
-                                asn_error_detail,
-                                jarm_error if jarm_todo else None,
-                            ),
-                            "recordedAt": fetched_at,
-                        }
-                    )
-                    LOGGER.debug(
-                        "tls fingerprint host=%s runId=%s ipCount=%s jarmTodo=%s asnTodo=%s",
-                        parsed_host,
-                        scan_id,
-                        len(ip_addresses),
-                        jarm_todo,
-                        asn_todo,
-                    )
-
-                call_mutation(sink, "fingerprints:upsertTlsFingerprint", tls_payload)
-
-                try:
-                    sink.mutation(
-                        "fingerprints:reportResult",
-                        strip_nones(
+                    if html_ok:
+                        sha256 = compute_sha256(body_bytes)
+                        normalized = normalize_html_text(html_text)
+                        normalized_sha256 = compute_sha256(normalized.encode("utf-8"))
+                        fuzzy_hash, fuzzy_todo = compute_fuzzy_hash(html_text)
+                        html_payload.update(
                             {
-                                "domainId": domain_id,
-                                "runId": scan_id,
-                                "workerId": config.worker_id,
-                                "status": status,
-                                "outcome": outcome,
-                                "error": error_message,
+                                "sha256": sha256,
+                                "normalizedSha256": normalized_sha256,
+                                "fuzzyHash": fuzzy_hash,
+                                "fuzzyHashTodo": fuzzy_todo,
+                                "htmlLength": len(body_bytes),
+                                "truncated": http_result.get("body_truncated"),
+                                "storageTodo": True,
                             }
-                        ),
-                    )
-                    LOGGER.info(
-                        "processed host=%s runId=%s status=%s",
+                        )
+                    else:
+                        html_payload.update(
+                            {"errorType": "no_html", "errorDetail": "no html body"}
+                        )
+                    LOGGER.debug(
+                        "html fingerprint host=%s runId=%s htmlOk=%s htmlLength=%s",
                         item.get("host"),
                         scan_id,
-                        status,
+                        html_ok,
+                        len(body_bytes),
+                    )
+
+                    call_stage_mutation(
+                        sink,
+                        "fingerprints:upsertHtmlFingerprint",
+                        strip_nones(html_payload),
+                        scan_id,
+                        domain_id,
+                        config.worker_id,
+                        RUN_ISSUE_STAGE_UPSERT_HTML,
+                        stage_errors,
+                    )
+
+                    assets_payload = {
+                        "scanId": scan_id,
+                        "domainId": domain_id,
+                        "localAssets": [],
+                        "localAssetCount": 0,
+                        "externalDomains": [],
+                        "externalDomainsFiltered": [],
+                        "recordedAt": fetched_at,
+                    }
+
+                    analytics_payload = {
+                        "scanId": scan_id,
+                        "domainId": domain_id,
+                        "googleAnalyticsIds": [],
+                        "googleAnalytics4Ids": [],
+                        "gtmIds": [],
+                        "facebookPixelIds": [],
+                        "recordedAt": fetched_at,
+                    }
+
+                    favicon_payload = None
+
+                    base_url = http_result.get("final_url") or requested_url
+                    if html_ok:
+                        base_url = extract_base_url(base_url, html_text)
+                        asset_urls = collect_asset_urls(html_text, base_url)
+                        base_host = urlparse(base_url).hostname or ""
+                        local_assets = []
+                        external_domains = []
+
+                        for asset_url in asset_urls:
+                            parsed = urlparse(asset_url)
+                            host = parsed.hostname or ""
+                            if host_matches(host, base_host):
+                                local_assets.append(asset_url)
+                            else:
+                                external_domains.append(normalize_host(host))
+
+                        external_domains = list(
+                            dict.fromkeys(filter(None, external_domains))
+                        )
+                        filtered_external = [
+                            domain
+                            for domain in external_domains
+                            if not is_allowed_domain(
+                                domain, DEFAULT_EXTERNAL_ALLOWLIST
+                            )
+                        ]
+
+                        assets_payload["localAssetCount"] = len(local_assets)
+                        assets_payload["externalDomains"] = external_domains[
+                            : config.fingerprint_max_external_domains
+                        ]
+                        assets_payload["externalDomainsFiltered"] = filtered_external[
+                            : config.fingerprint_max_external_domains
+                        ]
+                        assets_payload["localAssetsTruncated"] = (
+                            len(local_assets) > config.fingerprint_max_assets
+                        )
+
+                        for asset_url in local_assets[: config.fingerprint_max_assets]:
+                            asset_result = fetch_binary(
+                                asset_url,
+                                config.fingerprint_asset_timeout_ms,
+                                config.fingerprint_asset_max_bytes,
+                                config.fingerprint_user_agent,
+                            )
+                            if asset_result.get("ok"):
+                                body = asset_result.get("body_bytes", b"")
+                                assets_payload["localAssets"].append(
+                                    strip_nones(
+                                        {
+                                            "url": asset_url,
+                                            "sha256": compute_sha256(body)
+                                            if body
+                                            else None,
+                                            "contentType": asset_result.get(
+                                                "content_type"
+                                            ),
+                                            "contentLength": asset_result.get(
+                                                "content_length"
+                                            ),
+                                            "truncated": asset_result.get(
+                                                "body_truncated"
+                                            ),
+                                        }
+                                    )
+                                )
+                            else:
+                                assets_payload["localAssets"].append(
+                                    strip_nones(
+                                        {
+                                            "url": asset_url,
+                                            "errorType": asset_result.get("error_type"),
+                                        }
+                                    )
+                                )
+
+                        ga_ids, ga4_ids, gtm_ids, fb_ids = extract_trackers(html_text)
+                        analytics_payload.update(
+                            {
+                                "googleAnalyticsIds": ga_ids,
+                                "googleAnalytics4Ids": ga4_ids,
+                                "gtmIds": gtm_ids,
+                                "facebookPixelIds": fb_ids,
+                            }
+                        )
+
+                        favicon_url = find_favicon_url(base_url, html_text)
+                        LOGGER.debug(
+                            "asset analysis host=%s runId=%s localAssets=%s externalDomains=%s filteredExternalDomains=%s",
+                            item.get("host"),
+                            scan_id,
+                            len(local_assets),
+                            len(external_domains),
+                            len(filtered_external),
+                        )
+                    else:
+                        assets_payload.update(
+                            {"errorType": "no_html", "errorDetail": "no html body"}
+                        )
+                        analytics_payload.update(
+                            {"errorType": "no_html", "errorDetail": "no html body"}
+                        )
+                        favicon_url = (
+                            urlparse(base_url)._replace(path="/favicon.ico").geturl()
+                        )
+                        LOGGER.debug(
+                            "asset analysis skipped host=%s runId=%s reason=no_html",
+                            item.get("host"),
+                            scan_id,
+                        )
+
+                    call_stage_mutation(
+                        sink,
+                        "fingerprints:upsertAssetsFingerprint",
+                        assets_payload,
+                        scan_id,
+                        domain_id,
+                        config.worker_id,
+                        RUN_ISSUE_STAGE_UPSERT_ASSETS,
+                        stage_errors,
+                    )
+                    call_stage_mutation(
+                        sink,
+                        "fingerprints:upsertAnalyticsFingerprint",
+                        analytics_payload,
+                        scan_id,
+                        domain_id,
+                        config.worker_id,
+                        RUN_ISSUE_STAGE_UPSERT_ANALYTICS,
+                        stage_errors,
+                    )
+
+                    favicon_result = fetch_binary(
+                        favicon_url,
+                        config.fingerprint_favicon_timeout_ms,
+                        config.fingerprint_favicon_max_bytes,
+                        config.fingerprint_user_agent,
+                    )
+                    if favicon_result.get("ok"):
+                        icon_bytes = favicon_result.get("body_bytes", b"")
+                        mmh3_hash = None
+                        if icon_bytes:
+                            mmh3_hash = mmh3.hash(
+                                base64.b64encode(icon_bytes), signed=False
+                            )
+                        favicon_payload = strip_nones(
+                            {
+                                "scanId": scan_id,
+                                "domainId": domain_id,
+                                "url": favicon_result.get("final_url") or favicon_url,
+                                "status": favicon_result.get("status"),
+                                "contentType": favicon_result.get("content_type"),
+                                "contentLength": favicon_result.get("content_length"),
+                                "sha256": compute_sha256(icon_bytes)
+                                if icon_bytes
+                                else None,
+                                "mmh3": mmh3_hash,
+                                "storageTodo": True,
+                                "recordedAt": fetched_at,
+                            }
+                        )
+                        LOGGER.debug(
+                            "favicon fingerprint host=%s runId=%s status=%s contentLength=%s",
+                            item.get("host"),
+                            scan_id,
+                            favicon_result.get("status"),
+                            favicon_result.get("content_length"),
+                        )
+                    else:
+                        favicon_payload = strip_nones(
+                            {
+                                "scanId": scan_id,
+                                "domainId": domain_id,
+                                "url": favicon_url,
+                                "errorType": favicon_result.get("error_type"),
+                                "errorDetail": favicon_result.get("error_detail"),
+                                "recordedAt": fetched_at,
+                            }
+                        )
+                        LOGGER.debug(
+                            "favicon fetch failed host=%s runId=%s errorType=%s",
+                            item.get("host"),
+                            scan_id,
+                            favicon_result.get("error_type"),
+                        )
+
+                    call_stage_mutation(
+                        sink,
+                        "fingerprints:upsertFaviconFingerprint",
+                        favicon_payload,
+                        scan_id,
+                        domain_id,
+                        config.worker_id,
+                        RUN_ISSUE_STAGE_UPSERT_FAVICON,
+                        stage_errors,
+                    )
+
+                    parsed_host = urlparse(base_url).hostname or ""
+
+                    if config.fingerprint_disable_tls:
+                        tls_payload = strip_nones(
+                            {
+                                "scanId": scan_id,
+                                "domainId": domain_id,
+                                "hostname": parsed_host or None,
+                                "ipAddresses": [],
+                                "jarmTodo": True,
+                                "asnTodo": True,
+                                "errorType": "disabled",
+                                "errorDetail": "tls_disabled",
+                                "recordedAt": fetched_at,
+                            }
+                        )
+                        LOGGER.debug(
+                            "tls fingerprint skipped host=%s runId=%s reason=tls_disabled",
+                            item.get("host"),
+                            scan_id,
+                        )
+                    else:
+                        ip_addresses = resolve_ips(parsed_host)
+                        tls_info = collect_tls_info(
+                            parsed_host, config.fingerprint_timeout_ms
+                        )
+                        asn_value = lookup_asn(asn_db, ip_addresses)
+                        asn_todo = asn_value is None
+                        asn_error_detail = asn_error if asn_todo else None
+                        if config.fingerprint_disable_jarm:
+                            jarm_value = None
+                            jarm_error = "jarm_disabled"
+                        else:
+                            jarm_value, jarm_error = compute_jarm(
+                                parsed_host, 443, config.fingerprint_jarm_timeout_ms
+                            )
+                        jarm_todo = jarm_value is None
+                        tls_payload = strip_nones(
+                            {
+                                "scanId": scan_id,
+                                "domainId": domain_id,
+                                "hostname": parsed_host or None,
+                                "ipAddresses": ip_addresses,
+                                "certSha1": tls_info.get("cert_sha1"),
+                                "certSha256": tls_info.get("cert_sha256"),
+                                "certSubject": tls_info.get("cert_subject"),
+                                "certIssuer": tls_info.get("cert_issuer"),
+                                "certNotBefore": tls_info.get("cert_not_before"),
+                                "certNotAfter": tls_info.get("cert_not_after"),
+                                "jarm": jarm_value,
+                                "jarmTodo": jarm_todo,
+                                "asn": asn_value,
+                                "asnTodo": asn_todo,
+                                "errorType": tls_info.get("error_type"),
+                                "errorDetail": join_errors(
+                                    tls_info.get("error_detail"),
+                                    asn_error_detail,
+                                    jarm_error if jarm_todo else None,
+                                ),
+                                "recordedAt": fetched_at,
+                            }
+                        )
+                        LOGGER.debug(
+                            "tls fingerprint host=%s runId=%s ipCount=%s jarmTodo=%s asnTodo=%s",
+                            parsed_host,
+                            scan_id,
+                            len(ip_addresses),
+                            jarm_todo,
+                            asn_todo,
+                        )
+
+                    call_stage_mutation(
+                        sink,
+                        "fingerprints:upsertTlsFingerprint",
+                        tls_payload,
+                        scan_id,
+                        domain_id,
+                        config.worker_id,
+                        RUN_ISSUE_STAGE_UPSERT_TLS,
+                        stage_errors,
                     )
                 except Exception as error:
+                    error_detail = clamp_text(error, ISSUE_DETAIL_MAX_LEN) or "unknown_error"
                     LOGGER.exception(
-                        "failed host=%s runId=%s error=%s",
+                        "processing failed host=%s runId=%s error=%s",
                         item.get("host"),
                         scan_id,
                         error,
+                    )
+                    run_status = RUN_STATUS_ERROR
+                    error_message = f"processing_exception: {error_detail}"
+                    outcome = {
+                        "kind": RUN_OUTCOME_WORKER_EXCEPTION,
+                        "detail": error_detail,
+                    }
+                    record_run_issue(
+                        sink,
+                        scan_id,
+                        domain_id,
+                        config.worker_id,
+                        RUN_ISSUE_STAGE_PROCESSING,
+                        RUN_ISSUE_CODE_PROCESSING_EXCEPTION,
+                        "unexpected worker exception during processing",
+                        error_detail,
+                    )
+                finally:
+                    if stage_errors:
+                        run_status = RUN_STATUS_ERROR
+                        joined_stage_errors = clamp_text(
+                            "; ".join(stage_errors), ISSUE_DETAIL_MAX_LEN
+                        )
+                        if error_message:
+                            error_message = clamp_text(
+                                f"{error_message}; stageErrors={joined_stage_errors}",
+                                RUN_ERROR_MAX_LEN,
+                            )
+                        else:
+                            error_message = clamp_text(
+                                f"stageErrors={joined_stage_errors}", RUN_ERROR_MAX_LEN
+                            )
+                    if outcome is None:
+                        outcome = {"kind": RUN_STATUS_FAILED, "detail": "missing_outcome"}
+                    finalize_run(
+                        sink,
+                        item.get("host"),
+                        scan_id,
+                        domain_id,
+                        config.worker_id,
+                        run_status,
+                        strip_nones(outcome),
+                        error_message,
                     )
 
             if config.max_loops and loop_count >= config.max_loops:
