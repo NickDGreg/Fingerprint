@@ -33,6 +33,7 @@ from fingerprint_http import fetch_binary, fetch_http
 from fingerprint_tls import (
     collect_tls_info,
     compute_jarm,
+    jarm_runtime_error,
     load_asn_db,
     lookup_asn,
     resolve_ips,
@@ -240,7 +241,9 @@ def finalize_run(
         return True
     except Exception as error:
         error_text = clamp_text(error, ISSUE_DETAIL_MAX_LEN) or "unknown_error"
-        LOGGER.exception("reportResult failed host=%s runId=%s error=%s", host, run_id, error)
+        LOGGER.exception(
+            "reportResult failed host=%s runId=%s error=%s", host, run_id, error
+        )
         record_run_issue(
             sink,
             run_id,
@@ -476,9 +479,17 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
     if not config.fingerprint_disable_tls:
         asn_db, asn_error = load_asn_db(config.fingerprint_asn_db_path)
         if asn_error:
-            LOGGER.warning("ASN lookup disabled: %s", asn_error)
+            LOGGER.warning(
+                "ASN lookup unavailable path=%s reason=%s",
+                config.fingerprint_asn_db_path or "<unset>",
+                asn_error,
+            )
         if config.fingerprint_disable_jarm:
             LOGGER.info("JARM disabled via FINGERPRINT_DISABLE_JARM=1")
+        else:
+            startup_jarm_error = jarm_runtime_error()
+            if startup_jarm_error:
+                LOGGER.warning("JARM unavailable: %s", startup_jarm_error)
     if config.fingerprint_disable_tls:
         LOGGER.info("TLS fingerprinting disabled via FINGERPRINT_DISABLE_TLS=1")
 
@@ -703,9 +714,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         filtered_external = [
                             domain
                             for domain in external_domains
-                            if not is_allowed_domain(
-                                domain, DEFAULT_EXTERNAL_ALLOWLIST
-                            )
+                            if not is_allowed_domain(domain, DEFAULT_EXTERNAL_ALLOWLIST)
                         ]
 
                         assets_payload["localAssetCount"] = len(local_assets)
@@ -941,12 +950,16 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                             }
                         )
                         LOGGER.debug(
-                            "tls fingerprint host=%s runId=%s ipCount=%s jarmTodo=%s asnTodo=%s",
+                            "tls fingerprint host=%s runId=%s ipCount=%s jarmTodo=%s "
+                            "asnTodo=%s tlsError=%s asnError=%s jarmError=%s",
                             parsed_host,
                             scan_id,
                             len(ip_addresses),
                             jarm_todo,
                             asn_todo,
+                            tls_info.get("error_type"),
+                            asn_error_detail,
+                            jarm_error if jarm_todo else None,
                         )
 
                     call_stage_mutation(
@@ -960,7 +973,9 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         stage_errors,
                     )
                 except Exception as error:
-                    error_detail = clamp_text(error, ISSUE_DETAIL_MAX_LEN) or "unknown_error"
+                    error_detail = (
+                        clamp_text(error, ISSUE_DETAIL_MAX_LEN) or "unknown_error"
+                    )
                     LOGGER.exception(
                         "processing failed host=%s runId=%s error=%s",
                         item.get("host"),
@@ -999,7 +1014,10 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                                 f"stageErrors={joined_stage_errors}", RUN_ERROR_MAX_LEN
                             )
                     if outcome is None:
-                        outcome = {"kind": RUN_STATUS_FAILED, "detail": "missing_outcome"}
+                        outcome = {
+                            "kind": RUN_STATUS_FAILED,
+                            "detail": "missing_outcome",
+                        }
                     finalize_run(
                         sink,
                         item.get("host"),

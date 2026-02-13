@@ -232,12 +232,6 @@ wheels = [
 ]
 
 [[package]]
-name = "jarm"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c9/72/bbeb5aa9c3e4a0bfe350ca8945bfa24db90801bbe3e4022932797d3ce747/jarm-0.1.0.tar.gz", hash = "sha256:3ea267b836c6b7a54387896db2eab2d6d88566c4b6735d74fde49b4d14bf36ab", size = 1968, upload-time = "2024-05-01T12:54:59.702Z" }
-
-[[package]]
 name = "mmh3"
 version = "5.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -376,6 +370,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyjarm"
+version = "0.0.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/bc/ac50196c6493c056cf5aa6af4101dbc502cd61d674c1d3ff5145f5c5d561/pyjarm-0.0.5.tar.gz", hash = "sha256:73110c42e65ce21944d18ebf0639d1ade3d36ef36b416d4577cf83574fce6541", size = 16770, upload-time = "2021-02-09T16:29:22.237Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/fa/af3f0352cf3f1fe31eb5f821c340b56aca587702a759055a693cc373471d/pyjarm-0.0.5-py3-none-any.whl", hash = "sha256:c955396901e59710d61b1cb7e442735fe9840ed6d8dd87ffba8cef159cc083c4", size = 25269, upload-time = "2021-02-09T16:29:20.591Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -466,9 +469,9 @@ source = { virtual = "." }
 dependencies = [
     { name = "beautifulsoup4" },
     { name = "convex" },
-    { name = "jarm" },
     { name = "mmh3" },
     { name = "pyasn" },
+    { name = "pyjarm" },
     { name = "requests" },
     { name = "ssdeep" },
 ]
@@ -485,9 +488,9 @@ dev = [
 requires-dist = [
     { name = "beautifulsoup4" },
     { name = "convex" },
-    { name = "jarm" },
     { name = "mmh3" },
     { name = "pyasn" },
+    { name = "pyjarm", specifier = ">=0.0.5" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "requests" },
     { name = "ruff", marker = "extra == 'dev'" },

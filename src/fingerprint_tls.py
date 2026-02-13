@@ -1,18 +1,30 @@
 import hashlib
 import importlib
+import os
 import socket
 import ssl
 from typing import Any
 
+_PYASN_IMPORT_ERROR: str | None = None
 try:
     pyasn: Any = importlib.import_module("pyasn")
-except Exception:
+except Exception as error:
     pyasn = None
+    _PYASN_IMPORT_ERROR = f"{type(error).__name__}: {error}"
 
+_JARM_IMPORT_ERROR: str | None = None
 try:
     jarm: Any = importlib.import_module("jarm")
-except Exception:
+except Exception as error:
     jarm = None
+    _JARM_IMPORT_ERROR = f"{type(error).__name__}: {error}"
+
+JARM_CANDIDATE_FUNCS = (
+    "get_jarm_hash",
+    "jarm_hash",
+    "hash",
+    "fingerprint",
+)
 
 
 def resolve_ips(hostname):
@@ -29,12 +41,18 @@ def resolve_ips(hostname):
 
 
 def load_asn_db(db_path):
-    if not db_path or not pyasn:
-        return None, "asn_db_unavailable"
+    if not db_path:
+        return None, "asn_db_path_missing"
+    if not pyasn:
+        if _PYASN_IMPORT_ERROR:
+            return None, f"asn_module_unavailable: {_PYASN_IMPORT_ERROR}"
+        return None, "asn_module_unavailable"
+    if not os.path.isfile(db_path):
+        return None, f"asn_db_not_found: {db_path}"
     try:
         return pyasn.pyasn(db_path), None
     except Exception as error:
-        return None, f"asn_db_error: {error}"
+        return None, f"asn_db_error: {type(error).__name__}: {error}"
 
 
 def lookup_asn(db, ip_addresses):
@@ -53,22 +71,28 @@ def lookup_asn(db, ip_addresses):
     return ", ".join(asns) if asns else None
 
 
+def jarm_runtime_error():
+    if not jarm:
+        if _JARM_IMPORT_ERROR:
+            return f"jarm_module_unavailable: {_JARM_IMPORT_ERROR}"
+        return "jarm_module_unavailable"
+    if any(callable(getattr(jarm, name, None)) for name in JARM_CANDIDATE_FUNCS):
+        return None
+    module_path = getattr(jarm, "__file__", "unknown")
+    return f"jarm_api_unavailable: module={module_path}"
+
+
 def compute_jarm(hostname, port, timeout_ms):
     if not hostname:
         return None, "jarm_no_host"
-    if not jarm:
-        return None, "jarm_unavailable"
+    runtime_error = jarm_runtime_error()
+    if runtime_error:
+        return None, runtime_error
 
-    candidates = [
-        "get_jarm_hash",
-        "jarm_hash",
-        "hash",
-        "fingerprint",
-    ]
     timeout_seconds = max(1, int(timeout_ms / 1000))
     last_error = None
 
-    for name in candidates:
+    for name in JARM_CANDIDATE_FUNCS:
         func = getattr(jarm, name, None)
         if not callable(func):
             continue
@@ -82,7 +106,7 @@ def compute_jarm(hostname, port, timeout_ms):
             try:
                 result = func(*args)
             except Exception as error:
-                last_error = str(error)
+                last_error = f"{type(error).__name__}: {error}"
                 continue
 
             if isinstance(result, str) and result:

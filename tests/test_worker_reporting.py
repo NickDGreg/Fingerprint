@@ -167,8 +167,7 @@ def test_stage_failure_records_issue_and_marks_run_error(monkeypatch):
     assert report_payload["status"] == "error"
     issue_payloads = grouped["fingerprints:recordRunIssue"]
     assert any(
-        payload["stage"] == "upsert_assets"
-        and payload["code"] == "mutation_exception"
+        payload["stage"] == "upsert_assets" and payload["code"] == "mutation_exception"
         for payload in issue_payloads
     )
 
