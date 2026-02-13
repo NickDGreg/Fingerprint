@@ -13,18 +13,14 @@ except Exception as error:
     _PYASN_IMPORT_ERROR = f"{type(error).__name__}: {error}"
 
 _JARM_IMPORT_ERROR: str | None = None
+_JARM_SCANNER_PATH: str | None = None
 try:
-    jarm: Any = importlib.import_module("jarm")
+    jarm_scanner_module: Any = importlib.import_module("jarm.scanner.scanner")
+    jarm_scanner: Any = getattr(jarm_scanner_module, "Scanner", None)
+    _JARM_SCANNER_PATH = getattr(jarm_scanner_module, "__file__", None)
 except Exception as error:
-    jarm = None
+    jarm_scanner = None
     _JARM_IMPORT_ERROR = f"{type(error).__name__}: {error}"
-
-JARM_CANDIDATE_FUNCS = (
-    "get_jarm_hash",
-    "jarm_hash",
-    "hash",
-    "fingerprint",
-)
 
 
 def resolve_ips(hostname):
@@ -72,14 +68,13 @@ def lookup_asn(db, ip_addresses):
 
 
 def jarm_runtime_error():
-    if not jarm:
+    if not jarm_scanner:
         if _JARM_IMPORT_ERROR:
             return f"jarm_module_unavailable: {_JARM_IMPORT_ERROR}"
         return "jarm_module_unavailable"
-    if any(callable(getattr(jarm, name, None)) for name in JARM_CANDIDATE_FUNCS):
+    if callable(getattr(jarm_scanner, "scan", None)):
         return None
-    module_path = getattr(jarm, "__file__", "unknown")
-    return f"jarm_api_unavailable: module={module_path}"
+    return f"jarm_api_unavailable: scanner={_JARM_SCANNER_PATH or 'unknown'}"
 
 
 def compute_jarm(hostname, port, timeout_ms):
@@ -88,40 +83,33 @@ def compute_jarm(hostname, port, timeout_ms):
     runtime_error = jarm_runtime_error()
     if runtime_error:
         return None, runtime_error
+    scan = getattr(jarm_scanner, "scan", None)
+    if not callable(scan):
+        return None, "jarm_api_unavailable: scanner=unknown"
 
     timeout_seconds = max(1, int(timeout_ms / 1000))
-    last_error = None
+    try:
+        result = scan(
+            dest_host=hostname,
+            dest_port=port,
+            timeout=timeout_seconds,
+            suppress=True,
+        )
+    except Exception as error:
+        return None, f"jarm_scan_error: {type(error).__name__}: {error}"
 
-    for name in JARM_CANDIDATE_FUNCS:
-        func = getattr(jarm, name, None)
-        if not callable(func):
-            continue
-        for args in (
-            (hostname, port, timeout_seconds),
-            (hostname, port),
-            (hostname, f"{hostname}:{port}"),
-            (f"{hostname}:{port}",),
-            (hostname,),
-        ):
-            try:
-                result = func(*args)
-            except Exception as error:
-                last_error = f"{type(error).__name__}: {error}"
-                continue
-
-            if isinstance(result, str) and result:
-                return result, None
-            if isinstance(result, (list, tuple)) and result:
-                first = result[0]
-                if isinstance(first, str) and first:
-                    return first, None
-            if isinstance(result, dict):
-                for key in ("jarm", "hash", "fingerprint"):
-                    value = result.get(key)
-                    if isinstance(value, str) and value:
-                        return value, None
-
-    return None, last_error or "jarm_failed"
+    if isinstance(result, str) and result:
+        return result, None
+    if isinstance(result, (tuple, list)) and result:
+        first = result[0]
+        if isinstance(first, str) and first:
+            return first, None
+    if isinstance(result, dict):
+        for key in ("jarm", "hash", "fingerprint"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                return value, None
+    return None, "jarm_scan_empty"
 
 
 def format_x509_name(name):
