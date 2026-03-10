@@ -334,7 +334,12 @@ def build_config(env):
     )
 
     worker_id = env.get("WORKER_ID") or f"worker-{uuid.uuid4()}"
-    poll_interval_ms = parse_number(env.get("WORKER_POLL_INTERVAL_MS"), 5000, 1000)
+    default_poll_interval_ms = (
+        3600000 if worker_environment == "development" else 300000
+    )
+    poll_interval_ms = parse_number(
+        env.get("WORKER_POLL_INTERVAL_MS"), default_poll_interval_ms, 1000
+    )
     batch_size = parse_number(env.get("WORKER_BATCH_SIZE"), 1, 1)
     lease_duration_ms = parse_number(env.get("WORKER_LEASE_DURATION_MS"), 60000, 1000)
     fingerprint_timeout_ms = parse_number(env.get("FINGERPRINT_TIMEOUT_MS"), 8000, 1000)

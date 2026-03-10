@@ -10,8 +10,7 @@ def test_jarm_runtime_error_includes_import_reason(monkeypatch):
     )
     error = fingerprint_tls.jarm_runtime_error()
     assert (
-        error
-        == "jarm_module_unavailable: ModuleNotFoundError: No module named 'jarm'"
+        error == "jarm_module_unavailable: ModuleNotFoundError: No module named 'jarm'"
     )
 
 

@@ -77,7 +77,7 @@ Optional:
 - `WORKER_LOG_LEVEL` — Python log level (`DEBUG`, `INFO`, etc). Defaults to `DEBUG` in development and `INFO` in production.
 - `WORKER_LOG_HTTP_DETAILS` — set to `1` to include redirect/header details in logs (default: `1` in development, `0` in production).
 - `WORKER_ID` — explicit identifier for logs and lease ownership (default: random UUID).
-- `WORKER_POLL_INTERVAL_MS` — idle wait before polling again (default: `5000`).
+- `WORKER_POLL_INTERVAL_MS` — idle wait before polling again (default: `3600000` in development, `300000` in production).
 - `WORKER_BATCH_SIZE` — domains to claim per loop (default: `1`).
 - `WORKER_LEASE_DURATION_MS` — lease duration for claimed work (default: `60000`).
 - `WORKER_MAX_LOOPS` — maximum poll loops before exit (use `1` for a single run).
