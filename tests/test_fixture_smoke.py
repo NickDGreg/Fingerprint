@@ -64,6 +64,8 @@ def test_fixture_smoke():
         grouped = _records_by_name(sink.records)
         http_payload = grouped["fingerprints:upsertHttpFingerprint"][0]
         assert http_payload["status"] == 200
+        assert "fetchedAt" in http_payload
+        assert isinstance(http_payload["headersTruncated"], bool)
         assert any(
             header.get("key") == "X-Test-Header" and header.get("value") == "fixture"
             for header in http_payload.get("headers", [])
@@ -88,5 +90,9 @@ def test_fixture_smoke():
         favicon_payload = grouped["fingerprints:upsertFaviconFingerprint"][0]
         expected_mmh3 = mmh3.hash(base64.b64encode(FIXTURE_FAVICON), signed=False)
         assert favicon_payload["mmh3"] == expected_mmh3
+
+        report_payload = grouped["fingerprints:reportResult"][0]
+        assert report_payload["status"] == "success"
+        assert report_payload["outcome"]["kind"] == "http_content"
     finally:
         server.close()

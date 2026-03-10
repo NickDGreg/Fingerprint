@@ -1,18 +1,26 @@
 import hashlib
 import importlib
+import os
 import socket
 import ssl
 from typing import Any
 
+_PYASN_IMPORT_ERROR: str | None = None
 try:
     pyasn: Any = importlib.import_module("pyasn")
-except Exception:
+except Exception as error:
     pyasn = None
+    _PYASN_IMPORT_ERROR = f"{type(error).__name__}: {error}"
 
+_JARM_IMPORT_ERROR: str | None = None
+_JARM_SCANNER_PATH: str | None = None
 try:
-    jarm: Any = importlib.import_module("jarm")
-except Exception:
-    jarm = None
+    jarm_scanner_module: Any = importlib.import_module("jarm.scanner.scanner")
+    jarm_scanner: Any = getattr(jarm_scanner_module, "Scanner", None)
+    _JARM_SCANNER_PATH = getattr(jarm_scanner_module, "__file__", None)
+except Exception as error:
+    jarm_scanner = None
+    _JARM_IMPORT_ERROR = f"{type(error).__name__}: {error}"
 
 
 def resolve_ips(hostname):
@@ -29,12 +37,18 @@ def resolve_ips(hostname):
 
 
 def load_asn_db(db_path):
-    if not db_path or not pyasn:
-        return None, "asn_db_unavailable"
+    if not db_path:
+        return None, "asn_db_path_missing"
+    if not pyasn:
+        if _PYASN_IMPORT_ERROR:
+            return None, f"asn_module_unavailable: {_PYASN_IMPORT_ERROR}"
+        return None, "asn_module_unavailable"
+    if not os.path.isfile(db_path):
+        return None, f"asn_db_not_found: {db_path}"
     try:
         return pyasn.pyasn(db_path), None
     except Exception as error:
-        return None, f"asn_db_error: {error}"
+        return None, f"asn_db_error: {type(error).__name__}: {error}"
 
 
 def lookup_asn(db, ip_addresses):
@@ -53,51 +67,49 @@ def lookup_asn(db, ip_addresses):
     return ", ".join(asns) if asns else None
 
 
+def jarm_runtime_error():
+    if not jarm_scanner:
+        if _JARM_IMPORT_ERROR:
+            return f"jarm_module_unavailable: {_JARM_IMPORT_ERROR}"
+        return "jarm_module_unavailable"
+    if callable(getattr(jarm_scanner, "scan", None)):
+        return None
+    return f"jarm_api_unavailable: scanner={_JARM_SCANNER_PATH or 'unknown'}"
+
+
 def compute_jarm(hostname, port, timeout_ms):
     if not hostname:
         return None, "jarm_no_host"
-    if not jarm:
-        return None, "jarm_unavailable"
+    runtime_error = jarm_runtime_error()
+    if runtime_error:
+        return None, runtime_error
+    scan = getattr(jarm_scanner, "scan", None)
+    if not callable(scan):
+        return None, "jarm_api_unavailable: scanner=unknown"
 
-    candidates = [
-        "get_jarm_hash",
-        "jarm_hash",
-        "hash",
-        "fingerprint",
-    ]
     timeout_seconds = max(1, int(timeout_ms / 1000))
-    last_error = None
+    try:
+        result = scan(
+            dest_host=hostname,
+            dest_port=port,
+            timeout=timeout_seconds,
+            suppress=True,
+        )
+    except Exception as error:
+        return None, f"jarm_scan_error: {type(error).__name__}: {error}"
 
-    for name in candidates:
-        func = getattr(jarm, name, None)
-        if not callable(func):
-            continue
-        for args in (
-            (hostname, port, timeout_seconds),
-            (hostname, port),
-            (hostname, f"{hostname}:{port}"),
-            (f"{hostname}:{port}",),
-            (hostname,),
-        ):
-            try:
-                result = func(*args)
-            except Exception as error:
-                last_error = str(error)
-                continue
-
-            if isinstance(result, str) and result:
-                return result, None
-            if isinstance(result, (list, tuple)) and result:
-                first = result[0]
-                if isinstance(first, str) and first:
-                    return first, None
-            if isinstance(result, dict):
-                for key in ("jarm", "hash", "fingerprint"):
-                    value = result.get(key)
-                    if isinstance(value, str) and value:
-                        return value, None
-
-    return None, last_error or "jarm_failed"
+    if isinstance(result, str) and result:
+        return result, None
+    if isinstance(result, (tuple, list)) and result:
+        first = result[0]
+        if isinstance(first, str) and first:
+            return first, None
+    if isinstance(result, dict):
+        for key in ("jarm", "hash", "fingerprint"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                return value, None
+    return None, "jarm_scan_empty"
 
 
 def format_x509_name(name):
