@@ -1,0 +1,31 @@
+Code Structure
+==============
+
+src/fingerprint_worker/
+|
++-- config/
+|   `-- env.py
+|
++-- providers/
+|   |-- convex_provider.py
+|   |-- http_provider.py
+|   |-- logging_provider.py
+|   `-- tls_provider.py
+|
++-- repo/
+|   `-- job_io.py
+|
++-- service/
+|   |-- fingerprint_core.py
+|   |-- http_analysis.py
+|   |-- runtime_helpers.py
+|   `-- tls_analysis.py
+|
++-- runtime/
+|   |-- reporting.py
+|   `-- worker.py
+|
++-- testing/
+|   `-- fixture_server.py
+|
+`-- main.py

@@ -9,6 +9,11 @@ prefix_rule(
         ".venv/bin/uv run ruff format .",
         ".venv/bin/uv run ty check .",
         ".venv/bin/uv run python scripts/run_fixture_smoke.py",
+        ".venv/bin/uv run python scripts/lint_architecture.py",
+        ".venv/bin/uv run python scripts/lint_file_size.py",
+        ".venv/bin/uv run python scripts/lint_no_print.py",
+        ".venv/bin/uv run python scripts/sync_diagram_hash.py",
+        ".venv/bin/uv run python scripts/lint_diagram.py",
     ],
 )
 

@@ -121,8 +121,10 @@ def _mock_binary_ok(url, *args, **kwargs):
 
 
 def test_http_content_reports_success(monkeypatch):
-    monkeypatch.setattr("worker.fetch_http", _mock_http_ok)
-    monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
+    monkeypatch.setattr("fingerprint_worker.runtime.worker.fetch_http", _mock_http_ok)
+    monkeypatch.setattr(
+        "fingerprint_worker.service.http_analysis.fetch_binary", _mock_binary_ok
+    )
     sink = ControlledSink()
     run_worker(
         _build_config(batch_size=1),
@@ -137,8 +139,12 @@ def test_http_content_reports_success(monkeypatch):
 
 
 def test_unreachable_reports_unreachable(monkeypatch):
-    monkeypatch.setattr("worker.fetch_http", _mock_http_unreachable)
-    monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
+    monkeypatch.setattr(
+        "fingerprint_worker.runtime.worker.fetch_http", _mock_http_unreachable
+    )
+    monkeypatch.setattr(
+        "fingerprint_worker.service.http_analysis.fetch_binary", _mock_binary_ok
+    )
     sink = ControlledSink()
     run_worker(
         _build_config(batch_size=1),
@@ -153,8 +159,10 @@ def test_unreachable_reports_unreachable(monkeypatch):
 
 
 def test_stage_failure_records_issue_and_marks_run_error(monkeypatch):
-    monkeypatch.setattr("worker.fetch_http", _mock_http_ok)
-    monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
+    monkeypatch.setattr("fingerprint_worker.runtime.worker.fetch_http", _mock_http_ok)
+    monkeypatch.setattr(
+        "fingerprint_worker.service.http_analysis.fetch_binary", _mock_binary_ok
+    )
     sink = ControlledSink(fail_once_names={"fingerprints:upsertAssetsFingerprint"})
     run_worker(
         _build_config(batch_size=1),
@@ -173,8 +181,10 @@ def test_stage_failure_records_issue_and_marks_run_error(monkeypatch):
 
 
 def test_report_result_exception_records_issue(monkeypatch):
-    monkeypatch.setattr("worker.fetch_http", _mock_http_ok)
-    monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
+    monkeypatch.setattr("fingerprint_worker.runtime.worker.fetch_http", _mock_http_ok)
+    monkeypatch.setattr(
+        "fingerprint_worker.service.http_analysis.fetch_binary", _mock_binary_ok
+    )
     sink = ControlledSink(fail_names={"fingerprints:reportResult"})
     run_worker(
         _build_config(batch_size=1),
@@ -192,8 +202,10 @@ def test_report_result_exception_records_issue(monkeypatch):
 
 
 def test_report_result_rejection_records_issue(monkeypatch):
-    monkeypatch.setattr("worker.fetch_http", _mock_http_ok)
-    monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
+    monkeypatch.setattr("fingerprint_worker.runtime.worker.fetch_http", _mock_http_ok)
+    monkeypatch.setattr(
+        "fingerprint_worker.service.http_analysis.fetch_binary", _mock_binary_ok
+    )
     sink = ControlledSink(report_result_response={"ok": False, "reason": "stale_run"})
     run_worker(
         _build_config(batch_size=1),
@@ -212,8 +224,10 @@ def test_report_result_rejection_records_issue(monkeypatch):
 
 
 def test_loop_continues_after_stage_failure(monkeypatch):
-    monkeypatch.setattr("worker.fetch_http", _mock_http_ok)
-    monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
+    monkeypatch.setattr("fingerprint_worker.runtime.worker.fetch_http", _mock_http_ok)
+    monkeypatch.setattr(
+        "fingerprint_worker.service.http_analysis.fetch_binary", _mock_binary_ok
+    )
     jobs = [
         _job(run_id="run-1", network_artifact_id="artifact-1", host="one.example"),
         _job(run_id="run-2", network_artifact_id="artifact-2", host="two.example"),
@@ -234,8 +248,10 @@ def test_loop_continues_after_stage_failure(monkeypatch):
 
 
 def test_network_artifact_jobs_are_processed_with_artifact_result_contract(monkeypatch):
-    monkeypatch.setattr("worker.fetch_http", _mock_http_ok)
-    monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
+    monkeypatch.setattr("fingerprint_worker.runtime.worker.fetch_http", _mock_http_ok)
+    monkeypatch.setattr(
+        "fingerprint_worker.service.http_analysis.fetch_binary", _mock_binary_ok
+    )
     sink = ControlledSink()
     run_worker(
         _build_config(batch_size=1),

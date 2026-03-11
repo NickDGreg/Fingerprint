@@ -1,4 +1,4 @@
-from fingerprint_worker.repo.job_io import (
+from .job_io import (
     ConvexJobSource,
     ConvexResultSink,
     FileJobSource,

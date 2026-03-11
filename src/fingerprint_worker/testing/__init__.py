@@ -1,4 +1,4 @@
-from fingerprint_worker.testing.fixture_server import (
+from .fixture_server import (
     FIXTURE_CSS,
     FIXTURE_FAVICON,
     FIXTURE_HTML,

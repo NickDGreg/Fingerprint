@@ -13,7 +13,7 @@ def test_normalize_job_payload_accepts_network_artifact_shape():
     assert job["networkArtifactId"] == "artifact-1"
     assert job["websiteHost"] == "example.test"
     assert job["websiteUrl"] == "https://example.test/login"
-    assert job["runId"].startswith("local-run-")
+    assert str(job["runId"]).startswith("local-run-")
 
 
 def test_file_job_source_backfills_legacy_aliases_for_artifact_jobs(tmp_path):
