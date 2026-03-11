@@ -1,0 +1,8 @@
+{
+  "generatedAt": "2026-03-11T10:26:24.893476+00:00",
+  "algorithm": "sha256",
+  "files": {
+    "docs/generated/high-level-architecture-diagram.txt": "7523b3daeb4a9cbc9980c4daf9d49b512899894a81d7596e270cfda7f1b81422",
+    "docs/generated/code-structure-diagram.txt": "9d399b764cd1d0455e9893844e705f5dd2e9b310d4054b6567b1d2dc0baed8b8"
+  }
+}

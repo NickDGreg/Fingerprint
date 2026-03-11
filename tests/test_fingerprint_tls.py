@@ -1,4 +1,4 @@
-import fingerprint_tls
+from fingerprint_worker.providers import tls_provider as fingerprint_tls
 
 
 def test_jarm_runtime_error_includes_import_reason(monkeypatch):

@@ -1,0 +1,30 @@
+Fingerprint Worker Runtime
+==========================
+
+  Env Vars
+     |
+     v
+  main.py
+     |
+     +------------------------------+
+     | choose adapters              |
+     v                              v
+  Convex job source           File job source
+     |                              |
+     +--------------+---------------+
+                    |
+                    v
+               runtime/worker
+                    |
+      +-------------+-------------+-------------+
+      |                           |             |
+      v                           v             v
+  HTTP fetch + outcome      content analysis   TLS analysis
+      |                           |             |
+      +-------------+-------------+-------------+
+                    |
+                    v
+             stage mutations + run issues
+                    |
+                    v
+               final run result

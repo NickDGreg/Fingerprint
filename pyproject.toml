@@ -13,6 +13,9 @@ dependencies = [
     "ssdeep",
 ]
 
+[project.scripts]
+fingerprint-worker = "fingerprint_worker.main:main"
+
 [project.optional-dependencies]
 dev = [
   "ruff",

@@ -1,0 +1,33 @@
+from typing import Any
+
+JsonDict = dict[str, Any]
+
+RUN_STATUS_RUNNING = "running"
+RUN_STATUS_SUCCESS = "success"
+RUN_STATUS_ERROR = "error"
+RUN_STATUS_FAILED = "failed"
+RUN_STATUS_ABANDONED = "abandoned"
+RUN_STATUS_UNREACHABLE = "unreachable"
+
+RUN_OUTCOME_HTTP_CONTENT = "http_content"
+RUN_OUTCOME_HTTP_ERROR = "http_error"
+RUN_OUTCOME_UNREACHABLE = "unreachable"
+RUN_OUTCOME_WORKER_EXCEPTION = "worker_exception"
+
+RUN_ISSUE_STAGE_UPSERT_HTTP = "upsert_http"
+RUN_ISSUE_STAGE_UPSERT_HTML = "upsert_html"
+RUN_ISSUE_STAGE_UPSERT_ASSETS = "upsert_assets"
+RUN_ISSUE_STAGE_UPSERT_ANALYTICS = "upsert_analytics"
+RUN_ISSUE_STAGE_UPSERT_FAVICON = "upsert_favicon"
+RUN_ISSUE_STAGE_UPSERT_TLS = "upsert_tls"
+RUN_ISSUE_STAGE_REPORT_RESULT = "report_result"
+RUN_ISSUE_STAGE_PROCESSING = "processing"
+
+RUN_ISSUE_CODE_MUTATION_EXCEPTION = "mutation_exception"
+RUN_ISSUE_CODE_REPORT_RESULT_EXCEPTION = "report_result_exception"
+RUN_ISSUE_CODE_REPORT_RESULT_REJECTED = "report_result_rejected"
+RUN_ISSUE_CODE_PROCESSING_EXCEPTION = "processing_exception"
+
+ISSUE_MESSAGE_MAX_LEN = 500
+ISSUE_DETAIL_MAX_LEN = 4000
+RUN_ERROR_MAX_LEN = 500

@@ -1,135 +1,64 @@
-# Fingerprinting Worker – Agent Instructions
+# AGENTS.md
 
-This repository contains a Python fingerprinting worker for scam domains.  
-The agent developing this system must follow the principles below.
+This file is the navigation map for coding agents working in this repository.
 
----
+## Mission
 
-## Core Goal
+Build and operate a Python fingerprinting worker that claims website jobs from Convex, fingerprints scam sites deterministically, and writes structured, explainable results back to Convex with strong observability and idempotent retry behavior.
 
-Build a **reliable, observable, idempotent fingerprinting worker** that:
+## Start Here (Order)
 
-- Pulls domains/jobs from Convex
-- Fingerprints scam websites safely and deterministically
-- Writes structured results back to Convex
-- Can run locally and on a single VM with no code changes
-- Uses the Convex Python SDK for backend calls
+1. Read `ARCHITECTURE.md` for the layer model and codemap.
+2. Read the generated diagrams in:
+   - `docs/generated/high-level-architecture-diagram.txt`
+   - `docs/generated/code-structure-diagram.txt`
+3. Read `docs/product-specs/index.md` and `docs/product-specs/fingerprint-worker-v1.md`.
+4. Read `docs/DESIGN.md` and `docs/RELIABILITY.md` for non-functional constraints.
+5. For substantial work, create or update an ExecPlan under `docs/exec-plans/active/` and follow `docs/PLANS.md`.
+6. Run quality gates before and after changes:
+   - `.venv/bin/uv run ruff check .`
+   - `.venv/bin/uv run ty check .`
+   - `.venv/bin/uv run pytest`
+   - `.venv/bin/uv run python scripts/lint_architecture.py`
+   - `.venv/bin/uv run python scripts/lint_file_size.py`
+   - `.venv/bin/uv run python scripts/lint_no_print.py`
+   - `.venv/bin/uv run python scripts/lint_diagram.py`
 
-This system prioritises **correctness, debuggability, and incremental evolution** over sophistication.
+## Docs Map
 
----
+- `docs/design-docs/`
+  - `index.md`: design doc index.
+  - `core-beliefs.md`: beliefs for agent-readable Python services.
+  - `layering-and-constraints.md`: import direction and repo-shape rules.
+  - `parallel-execution.md`: worktree and merge-safe guidance for parallel agent work.
+- `docs/product-specs/`
+  - `index.md`: product spec index.
+  - `fingerprint-worker-v1.md`: worker outcomes and acceptance criteria.
+- `docs/exec-plans/`
+  - `active/`: in-flight execution plans.
+  - `completed/`: completed plans.
+  - `tech-debt-tracker.md`: intentionally deferred cleanup.
+- `docs/generated/`
+  - `db-schema.md`: Convex contract and storage-shape notes.
+  - `high-level-architecture-diagram.txt`: runtime behavior overview.
+  - `code-structure-diagram.txt`: code map aligned to the Python package structure.
+  - `diagram-hashes.json`: generated hash metadata for diagram linting.
+- Top-level docs in `docs/`
+  - `DESIGN.md`, `PLANS.md`, `QUALITY_SCORE.md`, `RELIABILITY.md`, `SECURITY.md`.
 
-## Non-Goals (for now)
+## Required Working Agreements
 
-- High-throughput distributed systems
-- Multi-region workers
-- Perfect real-time guarantees
-- Complex external queues or orchestration frameworks
-- Premature optimisation
-
-If a design choice adds infrastructure or complexity without clear necessity, reject it.
-
----
-
-## Architectural Invariants
-
-These must always hold:
-
-1. **Convex is the source of truth**
-   - Job state, fingerprints, and run history live in Convex.
-   - The worker is stateless beyond in-flight execution.
-
-2. **At-least-once processing**
-   - Jobs may be retried.
-   - Fingerprinting and writes must be idempotent.
-
-3. **Explicit state transitions**
-   - Jobs move through clear states (e.g. queued → running → done/failed).
-   - No implicit or “hidden” transitions.
-
-4. **Failure is expected**
-   - Timeouts, network errors, malformed sites, dead domains are normal.
-   - The system must degrade gracefully and retry intelligently.
-
-5. **One worker is enough**
-   - The system must work correctly with a single worker.
-   - Concurrency is bounded and explicit.
-
----
-
-## Execution Model
-
-- The worker **pulls** work from Convex (never pushed).
-- Jobs are claimed via **leases/locks with expiry**.
-- If a worker crashes, work must eventually be reclaimed.
-- Long-running tasks must respect strict timeouts.
-
----
-
-## Fingerprinting Philosophy
-
-Fingerprinting should be:
-
-- **Deterministic**: same input → same output (as much as possible)
-- **Incremental**: start shallow, add depth later
-- **Explainable**: stored data should be interpretable by humans
-- **Non-invasive**: avoid unnecessary interaction with target sites
-
-Avoid:
-- Overfitting to one site
-- Fragile heuristics
-- Relying on a single signal
-
-Prefer **many weak signals** over one “clever” one.
-
----
-
-## Observability Requirements
-
-The system must make it easy to answer:
-
-- What domains were processed today?
-- Which jobs failed and why?
-- Is the worker alive?
-- How long does fingerprinting take?
-- What changed between runs?
-
-Logs, run records, and timestamps are first-class outputs.
-
----
-
-## Configuration & Secrets
-
-- All configuration comes from environment variables.
-- No secrets are committed to the repository.
-- The same container must run locally and in production.
-- Behaviour differences are controlled via explicit config flags.
-- Keep dependencies minimal; prefer the Python standard library and `uv` for local envs.
-- Use the project virtual environment at `.venv` for all Python and tooling.
-- Use the `uv` executable from the project venv (`.venv/bin/uv`) rather than a system/global install.
-
----
-
-## Development Ethos
-
-- Build the end-to-end skeleton first.
-- Ship small, working increments.
-- Prefer boring, explicit code over abstraction.
-- If unsure, choose the design that is easiest to debug at 3am.
-- Break down the code following software engineering best practices, we do not want one single file that does everything, we need compartmentalised, testable, debuggable code
-
-The agent should always optimise for **clarity over cleverness**.
-
----
-
-## Verification Commands
-
-After making code changes, you must verify code quality.
-
-Run these from the repo root and ensure all are clear:
-
-- `.venv/bin/uv run ruff check .` (lint)
-- `.venv/bin/uv run ruff format .` (format)
-- `.venv/bin/uv run ty check .` (typecheck)
-- `.venv/bin/uv run pytest` (tests)
-- `.venv/bin/uv run python scripts/run_fixture_smoke.py` (smoke: fixture server + file job source)
+- Keep files small and semantically named.
+- Preserve typed boundaries; parse unknown external data into typed or validated shapes before business logic.
+- Use the logger provider in application code; do not add `print()` calls under `src/fingerprint_worker/`.
+- Keep architecture diagrams updated whenever runtime flow or package structure changes, then run:
+  - `.venv/bin/uv run python scripts/sync_diagram_hash.py`
+  - `.venv/bin/uv run python scripts/lint_diagram.py`
+- Respect the package layers:
+  - `types`
+  - `config`
+  - `providers`
+  - `repo`
+  - `service`
+  - `runtime`
+- Record major implementation decisions and surprises in the active ExecPlan.
