@@ -4,13 +4,36 @@ import uuid
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-from fingerprint_core import normalize_host
-
 
 @dataclass
 class JobClaim:
     work: list
     lease_expires_at: int | None
+
+
+def normalize_job_payload(job, index=None):
+    updated = dict(job)
+    url = updated.get("websiteUrl")
+    host = updated.get("websiteHost")
+    if not host and url:
+        parsed = urlparse(url)
+        host = parsed.netloc or parsed.path.split("/", 1)[0]
+
+    if not updated.get("networkArtifactId"):
+        generated_host = host or "unknown"
+        updated["networkArtifactId"] = f"local-network-artifact-{generated_host}"
+    if host:
+        updated["websiteHost"] = host
+    if not url and host:
+        url = f"http://{host}"
+    if url:
+        updated["websiteUrl"] = url
+    if not updated.get("runId"):
+        if index is not None:
+            updated["runId"] = f"local-run-{index + 1}"
+        else:
+            updated["runId"] = f"local-run-{uuid.uuid4()}"
+    return updated
 
 
 class ConvexJobSource:
@@ -26,7 +49,12 @@ class ConvexJobSource:
                 "leaseDurationMs": lease_duration_ms,
             },
         )
-        return JobClaim(result.get("work", []), result.get("leaseExpiresAt"))
+        work = [
+            normalize_job_payload(job)
+            for job in result.get("work", [])
+            if isinstance(job, dict)
+        ]
+        return JobClaim(work, result.get("leaseExpiresAt"))
 
 
 class FileJobSource:
@@ -46,23 +74,7 @@ class FileJobSource:
         return [job for job in jobs if isinstance(job, dict)]
 
     def _ensure_ids(self, job, index):
-        updated = dict(job)
-        url = updated.get("url")
-        host = updated.get("host")
-        if not host and url:
-            parsed = urlparse(url)
-            host = parsed.netloc or parsed.path.split("/", 1)[0]
-            updated["host"] = host
-        stable_host = normalize_host(host or "") or "unknown"
-        if not updated.get("domainId"):
-            updated["domainId"] = f"local-domain-{stable_host}"
-        if not updated.get("runId"):
-            updated["runId"] = f"local-run-{index + 1}"
-        if not updated.get("url") and updated.get("host"):
-            updated["url"] = f"http://{updated['host']}"
-        if not updated.get("runId"):
-            updated["runId"] = f"local-run-{uuid.uuid4()}"
-        return updated
+        return normalize_job_payload(job, index=index)
 
     def claim(self, worker_id, limit, lease_duration_ms):
         if self._cursor >= len(self._jobs):

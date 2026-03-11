@@ -21,8 +21,16 @@ def main():
         parsed = urlparse(base_url)
         host = parsed.netloc
         jobs = [
-            {"host": host, "url": f"{base_url}/"},
-            {"host": host, "url": f"{base_url}/redirect"},
+            {
+                "networkArtifactId": f"artifact-{host}",
+                "websiteHost": host,
+                "websiteUrl": f"{base_url}/",
+            },
+            {
+                "networkArtifactId": f"artifact-{host}",
+                "websiteHost": host,
+                "websiteUrl": f"{base_url}/redirect",
+            },
         ]
 
         jobs_path = os.path.join("tests", "fixtures", "jobs.generated.json")

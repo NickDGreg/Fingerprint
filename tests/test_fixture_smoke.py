@@ -31,7 +31,11 @@ def test_fixture_smoke():
         parsed = urlparse(base_url)
         host = parsed.netloc
         jobs = [
-            {"host": host, "url": f"{base_url}/"},
+            {
+                "networkArtifactId": f"artifact-{host}",
+                "websiteHost": host,
+                "websiteUrl": f"{base_url}/",
+            },
         ]
 
         with tempfile.NamedTemporaryFile(
@@ -41,7 +45,13 @@ def test_fixture_smoke():
             handle.write(
                 ",".join(
                     [
-                        f'{{"host": "{job["host"]}", "url": "{job["url"]}"}}'
+                        (
+                            "{"
+                            f'"networkArtifactId": "{job["networkArtifactId"]}", '
+                            f'"websiteHost": "{job["websiteHost"]}", '
+                            f'"websiteUrl": "{job["websiteUrl"]}"'
+                            "}"
+                        )
                         for job in jobs
                     ]
                 )
@@ -93,6 +103,7 @@ def test_fixture_smoke():
 
         report_payload = grouped["fingerprints:reportResult"][0]
         assert report_payload["status"] == "success"
+        assert report_payload["networkArtifactId"] == f"artifact-{host}"
         assert report_payload["outcome"]["kind"] == "http_content"
     finally:
         server.close()
