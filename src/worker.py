@@ -124,10 +124,28 @@ def build_issue_dedupe_key(run_id, stage, code):
     return f"fp-issue:{run_id}:{stage}:{code}"
 
 
+def get_job_record_id(item):
+    return item.get("networkArtifactId")
+
+
+def get_job_host(item):
+    return item.get("websiteHost")
+
+
+def get_job_url(item):
+    url = item.get("websiteUrl")
+    if url:
+        return url
+    host = get_job_host(item)
+    if host:
+        return f"https://{host}"
+    return None
+
+
 def record_run_issue(
     sink,
     run_id,
-    domain_id,
+    record_id,
     worker_id,
     stage,
     code,
@@ -137,7 +155,7 @@ def record_run_issue(
     payload = strip_nones(
         {
             "runId": run_id,
-            "domainId": domain_id,
+            "networkArtifactId": record_id,
             "workerId": worker_id,
             "stage": stage,
             "code": code,
@@ -170,7 +188,7 @@ def call_stage_mutation(
     mutation_name,
     payload,
     run_id,
-    domain_id,
+    record_id,
     worker_id,
     stage,
     stage_errors,
@@ -186,7 +204,7 @@ def call_stage_mutation(
         record_run_issue(
             sink,
             run_id,
-            domain_id,
+            record_id,
             worker_id,
             stage,
             RUN_ISSUE_CODE_MUTATION_EXCEPTION,
@@ -200,7 +218,7 @@ def finalize_run(
     sink,
     host,
     run_id,
-    domain_id,
+    record_id,
     worker_id,
     status,
     outcome,
@@ -208,7 +226,7 @@ def finalize_run(
 ):
     payload = strip_nones(
         {
-            "domainId": domain_id,
+            "networkArtifactId": record_id,
             "runId": run_id,
             "workerId": worker_id,
             "status": status,
@@ -229,7 +247,7 @@ def finalize_run(
             record_run_issue(
                 sink,
                 run_id,
-                domain_id,
+                record_id,
                 worker_id,
                 RUN_ISSUE_STAGE_REPORT_RESULT,
                 RUN_ISSUE_CODE_REPORT_RESULT_REJECTED,
@@ -247,7 +265,7 @@ def finalize_run(
         record_run_issue(
             sink,
             run_id,
-            domain_id,
+            record_id,
             worker_id,
             RUN_ISSUE_STAGE_REPORT_RESULT,
             RUN_ISSUE_CODE_REPORT_RESULT_EXCEPTION,
@@ -528,17 +546,18 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                 if shutting_down["value"]:
                     break
                 scan_id = item.get("runId")
-                domain_id = item.get("domainId")
-                requested_url = item.get("url") or f"https://{item.get('host')}"
+                record_id = get_job_record_id(item)
+                host = get_job_host(item)
+                requested_url = get_job_url(item) or "https://unknown"
                 fetched_at = now_ms()
                 run_status = RUN_STATUS_ERROR
                 outcome = None
                 error_message = None
                 stage_errors = []
                 LOGGER.debug(
-                    "processing host=%s domainId=%s runId=%s requestedUrl=%s",
-                    item.get("host"),
-                    domain_id,
+                    "processing host=%s recordId=%s runId=%s requestedUrl=%s",
+                    host,
+                    record_id,
                     scan_id,
                     requested_url,
                 )
@@ -572,7 +591,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         headers_truncated = False
                     LOGGER.debug(
                         "http result host=%s runId=%s outcomeKind=%s runStatus=%s httpStatus=%s durationMs=%s bodyBytes=%s",
-                        item.get("host"),
+                        host,
                         scan_id,
                         outcome.get("kind"),
                         run_status,
@@ -583,7 +602,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     if config.log_http_details:
                         LOGGER.debug(
                             "http details host=%s runId=%s finalUrl=%s redirects=%s headers=%s",
-                            item.get("host"),
+                            host,
                             scan_id,
                             http_result.get("final_url"),
                             http_result.get("redirect_chain") or [],
@@ -593,7 +612,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     http_payload = strip_nones(
                         {
                             "scanId": scan_id,
-                            "domainId": domain_id,
+                            "networkArtifactId": record_id,
                             "requestedUrl": http_result.get("requested_url"),
                             "finalUrl": http_result.get("final_url"),
                             "status": http_result.get("status"),
@@ -616,7 +635,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         "fingerprints:upsertHttpFingerprint",
                         http_payload,
                         scan_id,
-                        domain_id,
+                        record_id,
                         config.worker_id,
                         RUN_ISSUE_STAGE_UPSERT_HTTP,
                         stage_errors,
@@ -632,7 +651,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
 
                     html_payload = {
                         "scanId": scan_id,
-                        "domainId": domain_id,
+                        "networkArtifactId": record_id,
                         "recordedAt": fetched_at,
                     }
 
@@ -658,7 +677,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         )
                     LOGGER.debug(
                         "html fingerprint host=%s runId=%s htmlOk=%s htmlLength=%s",
-                        item.get("host"),
+                        host,
                         scan_id,
                         html_ok,
                         len(body_bytes),
@@ -669,7 +688,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         "fingerprints:upsertHtmlFingerprint",
                         strip_nones(html_payload),
                         scan_id,
-                        domain_id,
+                        record_id,
                         config.worker_id,
                         RUN_ISSUE_STAGE_UPSERT_HTML,
                         stage_errors,
@@ -677,7 +696,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
 
                     assets_payload = {
                         "scanId": scan_id,
-                        "domainId": domain_id,
+                        "networkArtifactId": record_id,
                         "localAssets": [],
                         "localAssetCount": 0,
                         "externalDomains": [],
@@ -687,7 +706,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
 
                     analytics_payload = {
                         "scanId": scan_id,
-                        "domainId": domain_id,
+                        "networkArtifactId": record_id,
                         "googleAnalyticsIds": [],
                         "googleAnalytics4Ids": [],
                         "gtmIds": [],
@@ -707,11 +726,11 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
 
                         for asset_url in asset_urls:
                             parsed = urlparse(asset_url)
-                            host = parsed.hostname or ""
-                            if host_matches(host, base_host):
+                            asset_host = parsed.hostname or ""
+                            if host_matches(asset_host, base_host):
                                 local_assets.append(asset_url)
                             else:
-                                external_domains.append(normalize_host(host))
+                                external_domains.append(normalize_host(asset_host))
 
                         external_domains = list(
                             dict.fromkeys(filter(None, external_domains))
@@ -784,7 +803,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         favicon_url = find_favicon_url(base_url, html_text)
                         LOGGER.debug(
                             "asset analysis host=%s runId=%s localAssets=%s externalDomains=%s filteredExternalDomains=%s",
-                            item.get("host"),
+                            host,
                             scan_id,
                             len(local_assets),
                             len(external_domains),
@@ -802,7 +821,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         )
                         LOGGER.debug(
                             "asset analysis skipped host=%s runId=%s reason=no_html",
-                            item.get("host"),
+                            host,
                             scan_id,
                         )
 
@@ -811,7 +830,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         "fingerprints:upsertAssetsFingerprint",
                         assets_payload,
                         scan_id,
-                        domain_id,
+                        record_id,
                         config.worker_id,
                         RUN_ISSUE_STAGE_UPSERT_ASSETS,
                         stage_errors,
@@ -821,7 +840,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         "fingerprints:upsertAnalyticsFingerprint",
                         analytics_payload,
                         scan_id,
-                        domain_id,
+                        record_id,
                         config.worker_id,
                         RUN_ISSUE_STAGE_UPSERT_ANALYTICS,
                         stage_errors,
@@ -843,7 +862,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         favicon_payload = strip_nones(
                             {
                                 "scanId": scan_id,
-                                "domainId": domain_id,
+                                "networkArtifactId": record_id,
                                 "url": favicon_result.get("final_url") or favicon_url,
                                 "status": favicon_result.get("status"),
                                 "contentType": favicon_result.get("content_type"),
@@ -858,7 +877,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         )
                         LOGGER.debug(
                             "favicon fingerprint host=%s runId=%s status=%s contentLength=%s",
-                            item.get("host"),
+                            host,
                             scan_id,
                             favicon_result.get("status"),
                             favicon_result.get("content_length"),
@@ -867,7 +886,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         favicon_payload = strip_nones(
                             {
                                 "scanId": scan_id,
-                                "domainId": domain_id,
+                                "networkArtifactId": record_id,
                                 "url": favicon_url,
                                 "errorType": favicon_result.get("error_type"),
                                 "errorDetail": favicon_result.get("error_detail"),
@@ -876,7 +895,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         )
                         LOGGER.debug(
                             "favicon fetch failed host=%s runId=%s errorType=%s",
-                            item.get("host"),
+                            host,
                             scan_id,
                             favicon_result.get("error_type"),
                         )
@@ -886,7 +905,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         "fingerprints:upsertFaviconFingerprint",
                         favicon_payload,
                         scan_id,
-                        domain_id,
+                        record_id,
                         config.worker_id,
                         RUN_ISSUE_STAGE_UPSERT_FAVICON,
                         stage_errors,
@@ -898,7 +917,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         tls_payload = strip_nones(
                             {
                                 "scanId": scan_id,
-                                "domainId": domain_id,
+                                "networkArtifactId": record_id,
                                 "hostname": parsed_host or None,
                                 "ipAddresses": [],
                                 "jarmTodo": True,
@@ -910,7 +929,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         )
                         LOGGER.debug(
                             "tls fingerprint skipped host=%s runId=%s reason=tls_disabled",
-                            item.get("host"),
+                            host,
                             scan_id,
                         )
                     else:
@@ -932,7 +951,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         tls_payload = strip_nones(
                             {
                                 "scanId": scan_id,
-                                "domainId": domain_id,
+                                "networkArtifactId": record_id,
                                 "hostname": parsed_host or None,
                                 "ipAddresses": ip_addresses,
                                 "certSha1": tls_info.get("cert_sha1"),
@@ -972,7 +991,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         "fingerprints:upsertTlsFingerprint",
                         tls_payload,
                         scan_id,
-                        domain_id,
+                        record_id,
                         config.worker_id,
                         RUN_ISSUE_STAGE_UPSERT_TLS,
                         stage_errors,
@@ -983,7 +1002,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     )
                     LOGGER.exception(
                         "processing failed host=%s runId=%s error=%s",
-                        item.get("host"),
+                        host,
                         scan_id,
                         error,
                     )
@@ -996,7 +1015,7 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                     record_run_issue(
                         sink,
                         scan_id,
-                        domain_id,
+                        record_id,
                         config.worker_id,
                         RUN_ISSUE_STAGE_PROCESSING,
                         RUN_ISSUE_CODE_PROCESSING_EXCEPTION,
@@ -1025,9 +1044,9 @@ def run_worker(config, job_source, sink, install_signal_handlers=True):
                         }
                     finalize_run(
                         sink,
-                        item.get("host"),
+                        host,
                         scan_id,
-                        domain_id,
+                        record_id,
                         config.worker_id,
                         run_status,
                         strip_nones(outcome),

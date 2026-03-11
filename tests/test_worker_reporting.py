@@ -63,12 +63,12 @@ def _build_config(batch_size):
     return build_config(env)
 
 
-def _job(run_id="run-1", domain_id="domain-1", host="example.test"):
+def _job(run_id="run-1", network_artifact_id="artifact-1", host="example.test"):
     return {
         "runId": run_id,
-        "domainId": domain_id,
-        "host": host,
-        "url": f"https://{host}",
+        "networkArtifactId": network_artifact_id,
+        "websiteHost": host,
+        "websiteUrl": f"https://{host}",
     }
 
 
@@ -215,8 +215,8 @@ def test_loop_continues_after_stage_failure(monkeypatch):
     monkeypatch.setattr("worker.fetch_http", _mock_http_ok)
     monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
     jobs = [
-        _job(run_id="run-1", domain_id="domain-1", host="one.example"),
-        _job(run_id="run-2", domain_id="domain-2", host="two.example"),
+        _job(run_id="run-1", network_artifact_id="artifact-1", host="one.example"),
+        _job(run_id="run-2", network_artifact_id="artifact-2", host="two.example"),
     ]
     sink = ControlledSink(fail_once_names={"fingerprints:upsertHttpFingerprint"})
     run_worker(
@@ -231,3 +231,23 @@ def test_loop_continues_after_stage_failure(monkeypatch):
     status_by_run = {payload["runId"]: payload["status"] for payload in report_payloads}
     assert status_by_run["run-1"] == "error"
     assert status_by_run["run-2"] == "success"
+
+
+def test_network_artifact_jobs_are_processed_with_artifact_result_contract(monkeypatch):
+    monkeypatch.setattr("worker.fetch_http", _mock_http_ok)
+    monkeypatch.setattr("worker.fetch_binary", _mock_binary_ok)
+    sink = ControlledSink()
+    run_worker(
+        _build_config(batch_size=1),
+        SingleBatchJobSource([_job()]),
+        sink,
+        install_signal_handlers=False,
+    )
+
+    grouped = _records_by_name(sink.records)
+    http_payload = grouped["fingerprints:upsertHttpFingerprint"][0]
+    report_payload = grouped["fingerprints:reportResult"][0]
+
+    assert http_payload["networkArtifactId"] == "artifact-1"
+    assert report_payload["networkArtifactId"] == "artifact-1"
+    assert report_payload["status"] == "success"

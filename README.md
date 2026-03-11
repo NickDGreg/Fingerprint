@@ -35,9 +35,9 @@ Those may come later. This is the foundation.
 1. Scam sources are ingested elsewhere (Convex cron)
 2. Domains needing inspection are queued in Convex
 3. This worker:
-   - pulls due jobs
+   - pulls due jobs for the network artifact being fingerprinted
    - claims them via a lease
-   - fingerprints the domain
+   - fingerprints the artifact's website endpoint
    - writes results and run metadata back to Convex
 4. Failed jobs are retried with backoff
 
@@ -107,6 +107,9 @@ Optional:
 - `CONVEX_ADMIN_KEY` — optional admin key if your Convex deployment requires it and your SDK supports admin auth.
 - `CONVEX_AUTH_TOKEN` — optional auth token if you gate mutations behind auth.
 
+When `JOB_SOURCE=file`, jobs use
+`networkArtifactId` / `websiteHost` / `websiteUrl`.
+
 ## Running locally (Docker)
 
 ### 1. Build the image (human)
@@ -149,6 +152,7 @@ If you want to change dependencies, use `uv add <package>` and re-run `uv sync`.
 
 - The worker is stateless; you can stop and restart it without losing progress.
 - Each claim creates a `fingerprintRuns` record in Convex so run history is visible.
+- The worker uses artifact-shaped job and result payloads.
 - Milestone 2 HTTP fingerprinting stores a small response sample plus status metadata to explain why a domain was classified as `http_content`, `http_error`, or `unreachable`.
 - Milestone 3 adds exponential backoff for failures and marks stale runs as `abandoned` when a lease expires.
 - The worker now stores per-scan outputs for HTTP, HTML hashes, favicon hash, local asset hashes, tracker IDs, and TLS metadata.
