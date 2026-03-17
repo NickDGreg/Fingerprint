@@ -8,8 +8,8 @@ Given a claimed website job, the worker must produce structured fingerprints tha
 
 Job payloads must provide:
 - `networkArtifactId`
-- `websiteHost`
-- `websiteUrl`
+- `host`
+- `canonicalUrl`
 - optional `runId`
 
 ## Outputs

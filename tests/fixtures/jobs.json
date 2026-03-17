@@ -2,13 +2,13 @@
   "jobs": [
     {
       "networkArtifactId": "local-network-artifact-127.0.0.1:8000",
-      "websiteHost": "127.0.0.1:8000",
-      "websiteUrl": "http://127.0.0.1:8000/"
+      "host": "127.0.0.1:8000",
+      "canonicalUrl": "http://127.0.0.1:8000/"
     },
     {
       "networkArtifactId": "local-network-artifact-127.0.0.1:8000",
-      "websiteHost": "127.0.0.1:8000",
-      "websiteUrl": "http://127.0.0.1:8000/redirect"
+      "host": "127.0.0.1:8000",
+      "canonicalUrl": "http://127.0.0.1:8000/redirect"
     }
   ]
 }
