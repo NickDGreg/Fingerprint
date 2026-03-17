@@ -17,8 +17,8 @@ def normalize_job_payload(
     index: int | None = None,
 ) -> dict[str, object]:
     updated = dict(job)
-    url = updated.get("websiteUrl")
-    host = updated.get("websiteHost")
+    url = updated.get("canonicalUrl")
+    host = updated.get("host")
     if not host and isinstance(url, str):
         parsed = urlparse(url)
         host = parsed.netloc or parsed.path.split("/", 1)[0]
@@ -26,11 +26,11 @@ def normalize_job_payload(
         generated_host = host or "unknown"
         updated["networkArtifactId"] = f"local-network-artifact-{generated_host}"
     if host:
-        updated["websiteHost"] = host
+        updated["host"] = host
     if not url and host:
         url = f"http://{host}"
     if url:
-        updated["websiteUrl"] = url
+        updated["canonicalUrl"] = url
     if not updated.get("runId"):
         updated["runId"] = (
             f"local-run-{index + 1}"

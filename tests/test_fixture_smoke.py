@@ -33,8 +33,8 @@ def test_fixture_smoke():
         jobs = [
             {
                 "networkArtifactId": f"artifact-{host}",
-                "websiteHost": host,
-                "websiteUrl": f"{base_url}/",
+                "host": host,
+                "canonicalUrl": f"{base_url}/",
             },
         ]
 
@@ -48,8 +48,8 @@ def test_fixture_smoke():
                         (
                             "{"
                             f'"networkArtifactId": "{job["networkArtifactId"]}", '
-                            f'"websiteHost": "{job["websiteHost"]}", '
-                            f'"websiteUrl": "{job["websiteUrl"]}"'
+                            f'"host": "{job["host"]}", '
+                            f'"canonicalUrl": "{job["canonicalUrl"]}"'
                             "}"
                         )
                         for job in jobs

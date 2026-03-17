@@ -67,8 +67,8 @@ def _job(run_id="run-1", network_artifact_id="artifact-1", host="example.test"):
     return {
         "runId": run_id,
         "networkArtifactId": network_artifact_id,
-        "websiteHost": host,
-        "websiteUrl": f"https://{host}",
+        "host": host,
+        "canonicalUrl": f"https://{host}",
     }
 
 

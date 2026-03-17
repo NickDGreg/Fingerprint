@@ -23,13 +23,13 @@ def main():
         jobs = [
             {
                 "networkArtifactId": f"artifact-{host}",
-                "websiteHost": host,
-                "websiteUrl": f"{base_url}/",
+                "host": host,
+                "canonicalUrl": f"{base_url}/",
             },
             {
                 "networkArtifactId": f"artifact-{host}",
-                "websiteHost": host,
-                "websiteUrl": f"{base_url}/redirect",
+                "host": host,
+                "canonicalUrl": f"{base_url}/redirect",
             },
         ]
 

@@ -42,12 +42,12 @@ def get_job_record_id(item: dict[str, object]) -> str | None:
 
 
 def get_job_host(item: dict[str, object]) -> str | None:
-    value = item.get("websiteHost")
+    value = item.get("host")
     return value if isinstance(value, str) else None
 
 
 def get_job_url(item: dict[str, object]) -> str | None:
-    url = item.get("websiteUrl")
+    url = item.get("canonicalUrl")
     if isinstance(url, str) and url:
         return url
     host = get_job_host(item)
